@@ -1,0 +1,163 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Police Dashboard Design System - Vibrant, Modern, Rounded */
+
+@layer base {
+  :root {
+    /* Light Mode - Vibrant Police Theme */
+    --background: 240 100% 99%;
+    --foreground: 224 71% 4%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 224 71% 4%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 71% 4%;
+
+    /* Primary - Police Blue */
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 98%;
+    --primary-hover: 217 91% 50%;
+
+    /* Secondary - Teal Green */
+    --secondary: 175 84% 32%;
+    --secondary-foreground: 0 0% 98%;
+    --secondary-hover: 175 84% 25%;
+
+    /* Success - Green */
+    --success: 142 76% 36%;
+    --success-foreground: 0 0% 98%;
+
+    /* Warning - Orange */
+    --warning: 25 95% 53%;
+    --warning-foreground: 0 0% 98%;
+
+    --muted: 210 40% 98%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+
+    --accent: 217 91% 95%;
+    --accent-foreground: 217 91% 60%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 217 91% 60%;
+
+    /* Rounded edges - extra rounded for modern look */
+    --radius: 1rem;
+    --radius-lg: 1.5rem;
+    --radius-xl: 2rem;
+
+    /* Gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--secondary)));
+    --gradient-card: linear-gradient(135deg, hsl(var(--card)), hsl(240 100% 99%));
+    
+    /* Shadows */
+    --shadow-glow: 0 0 20px hsl(var(--primary) / 0.15);
+    --shadow-card: 0 10px 25px -5px hsl(220 13% 91% / 0.5);
+
+    /* Animations */
+    --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-bounce: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+
+    /* Accommodation type colors */
+    --hotel: 217 91% 60%;        /* Blue */
+    --lodge: 142 76% 36%;        /* Green */
+    --guest-house: 258 90% 66%;  /* Purple */
+    --dormitory: 43 96% 56%;     /* Orange */
+    --pg: 328 86% 70%;           /* Pink */
+    --service-apartment: 172 76% 41%; /* Teal */
+    --hostel: 0 84% 60%;         /* Red */
+    --rental-house: 231 81% 60%; /* Indigo */
+
+    --sidebar-background: 0 0% 98%;
+
+    --sidebar-foreground: 240 5.3% 26.1%;
+
+    --sidebar-primary: 240 5.9% 10%;
+
+    --sidebar-primary-foreground: 0 0% 98%;
+
+    --sidebar-accent: 240 4.8% 95.9%;
+
+    --sidebar-accent-foreground: 240 5.9% 10%;
+
+    --sidebar-border: 220 13% 91%;
+
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    /* Dark Mode - Vibrant Dark Police Theme */
+    --background: 224 71% 4%;
+    --foreground: 0 0% 98%;
+
+    --card: 224 71% 8%;
+    --card-foreground: 0 0% 98%;
+
+    --popover: 224 71% 8%;
+    --popover-foreground: 0 0% 98%;
+
+    /* Primary - Bright Blue */
+    --primary: 217 91% 70%;
+    --primary-foreground: 224 71% 4%;
+    --primary-hover: 217 91% 80%;
+
+    /* Secondary - Bright Teal */
+    --secondary: 175 84% 45%;
+    --secondary-foreground: 224 71% 4%;
+    --secondary-hover: 175 84% 55%;
+
+    /* Success - Bright Green */
+    --success: 142 76% 50%;
+    --success-foreground: 224 71% 4%;
+
+    /* Warning - Bright Orange */
+    --warning: 25 95% 65%;
+    --warning-foreground: 224 71% 4%;
+
+    --muted: 224 71% 12%;
+    --muted-foreground: 215 20.2% 65.1%;
+
+    --accent: 224 71% 12%;
+    --accent-foreground: 217 91% 70%;
+
+    --destructive: 0 84.2% 70%;
+    --destructive-foreground: 224 71% 4%;
+
+    --border: 224 71% 15%;
+    --input: 224 71% 15%;
+    --ring: 217 91% 70%;
+
+    /* Dark mode gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--secondary)));
+    --gradient-card: linear-gradient(135deg, hsl(var(--card)), hsl(224 71% 8%));
+    
+    /* Dark mode shadows */
+    --shadow-glow: 0 0 20px hsl(var(--primary) / 0.3);
+    --shadow-card: 0 10px 25px -5px hsl(0 0% 0% / 0.5);
+
+    --sidebar-background: 224 71% 6%;
+    --sidebar-foreground: 0 0% 98%;
+    --sidebar-primary: 217 91% 70%;
+    --sidebar-primary-foreground: 224 71% 4%;
+    --sidebar-accent: 224 71% 10%;
+    --sidebar-accent-foreground: 0 0% 98%;
+    --sidebar-border: 224 71% 15%;
+    --sidebar-ring: 217 91% 70%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
