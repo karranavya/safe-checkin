@@ -1,5 +1,8 @@
+// components/Login/LoginPage.tsx - Complete with Police Authentication
 import { useState } from "react";
+import React from "react";
 import { useNavigate } from "react-router-dom";
+import { usePoliceAuth } from "@/contexts/PoliceAuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,36 +26,31 @@ export const LoginPage = () => {
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { login, isAuthenticated } = usePoliceAuth();
 
+  // Redirect if already authenticated
+
+  // Simplified handleLogin function
+  // In LoginPage.tsx - handleLogin function
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
 
     try {
-      // For Vite, use import.meta.env (remove process.env completely)
       const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
-      console.log("API URL:", apiUrl);
-
-      // API call to your backend
       const response = await fetch(`${apiUrl}/api/police/login`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
 
       const data = await response.json();
 
       if (response.ok && data.success) {
-        // Store token in the format expected by reports component
+        // Store tokens
         const storage = rememberMe ? localStorage : sessionStorage;
-
-        // Store token for API calls
         storage.setItem("policeToken", data.token);
-
-        // Store complete auth data for other components that might need it
         storage.setItem(
           "police-dashboard-auth",
           JSON.stringify({
@@ -63,12 +61,31 @@ export const LoginPage = () => {
           })
         );
 
+        // Update context
+        login(data.token, data.police);
+
         toast({
           title: "Login Successful",
           description: `Welcome back, ${data.police.name}!`,
         });
 
-        navigate("/dashboard");
+        // FORCE NAVIGATION - Try all these approaches
+        console.log("About to navigate...");
+
+        // Method 1: Direct navigation with replace
+        navigate("/dashboard", { replace: true });
+
+        // Method 2: If above doesn't work, try with setTimeout
+        setTimeout(() => {
+          console.log("Timeout navigation attempt");
+          navigate("/dashboard", { replace: true });
+        }, 100);
+
+        // Method 3: As a last resort, use window.location
+        setTimeout(() => {
+          console.log("Window location fallback");
+          window.location.href = "/dashboard";
+        }, 500);
       } else {
         toast({
           title: "Login Failed",
@@ -80,12 +97,24 @@ export const LoginPage = () => {
       console.error("Login error:", error);
       toast({
         title: "Login Error",
-        description: "Network error. Please check if the server is running.",
+        description: "Cannot connect to server",
         variant: "destructive",
       });
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Quick fill for testing
+  const fillTestCredentials = (type: "admin" | "officer" | "inspector") => {
+    const credentials = {
+      admin: { email: "admin@police.gov.in", password: "admin123" },
+      officer: { email: "officer@police.gov.in", password: "police123" },
+      inspector: { email: "inspector@police.gov.in", password: "inspect123" },
+    };
+
+    setEmail(credentials[type].email);
+    setPassword(credentials[type].password);
   };
 
   return (
@@ -162,7 +191,16 @@ export const LoginPage = () => {
                 {isLoading ? "Logging in..." : "Login"}
               </Button>
             </form>
-
+            <Button
+              type="button"
+              onClick={() => {
+                console.log("Manual navigation test");
+                navigate("/dashboard", { replace: true });
+              }}
+              className="w-full mt-2 bg-red-500 hover:bg-red-600"
+            >
+              DEBUG: Test Navigation
+            </Button>
             <div className="text-center">
               <button
                 type="button"
@@ -173,11 +211,43 @@ export const LoginPage = () => {
               </button>
             </div>
 
-            {/* Debug info for development */}
+            {/* Test Credentials Section */}
             <div className="mt-6 p-4 bg-muted/50 rounded-lg">
-              <h4 className="text-sm font-semibold text-foreground mb-2">
-                Test Credentials (for development):
+              <h4 className="text-sm font-semibold text-foreground mb-3">
+                Test Credentials (Development):
               </h4>
+
+              {/* Quick Fill Buttons */}
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => fillTestCredentials("admin")}
+                  className="text-xs"
+                >
+                  Admin
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => fillTestCredentials("officer")}
+                  className="text-xs"
+                >
+                  Officer
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => fillTestCredentials("inspector")}
+                  className="text-xs"
+                >
+                  Inspector
+                </Button>
+              </div>
+
               <div className="space-y-1 text-xs text-muted-foreground">
                 <div>
                   <strong>Admin:</strong> admin@police.gov.in / admin123
@@ -190,6 +260,7 @@ export const LoginPage = () => {
                   inspect123
                 </div>
               </div>
+
               <div className="mt-2 text-xs text-blue-600">
                 API URL:{" "}
                 {import.meta.env.VITE_API_URL || "http://localhost:5000"}

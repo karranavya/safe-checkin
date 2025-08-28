@@ -1,9 +1,8 @@
-// controllers/reportsController.js (Enhanced Version)
+// controllers/reportsController.js (FIXED VERSION)
 const Guest = require("../models/Guest");
 const Hotel = require("../models/Hotel");
 
 // Utility: get start date for period
-// In reportsController.js
 function getStartOfPeriod(period) {
   const now = new Date();
 
@@ -29,7 +28,6 @@ function getStartOfPeriod(period) {
       return new Date(Date.UTC(year, month, 1, 0, 0, 0, 0));
     }
     case "all": {
-      // Return a very old date to include all records
       return new Date(2020, 0, 1);
     }
     default:
@@ -37,7 +35,7 @@ function getStartOfPeriod(period) {
   }
 }
 
-// Enhanced getAreaWideStats with better error handling and logging
+// FIXED: Enhanced getAreaWideStats with correct guest counting
 exports.getAreaWideStats = async (req, res) => {
   try {
     console.log("getAreaWideStats called with query:", req.query);
@@ -46,14 +44,11 @@ exports.getAreaWideStats = async (req, res) => {
     const startDate = getStartOfPeriod(period);
     const endDate = new Date();
 
-    // Enhanced logging for debugging
     console.log("Enhanced Debug Info:", {
       period,
       requestTime: endDate.toISOString(),
       startDate: startDate.toISOString(),
       endDate: endDate.toISOString(),
-      startDateLocal: startDate.toString(),
-      endDateLocal: endDate.toString(),
     });
 
     // Build hotel query
@@ -82,56 +77,65 @@ exports.getAreaWideStats = async (req, res) => {
           totalCheckouts: 0,
           totalAccommodations: 0,
           totalGuests: 0,
+          totalGuestRecords: 0,
         },
       });
     }
 
-    // Log some sample guest data for debugging
-    const sampleGuests = await Guest.find({ hotelId: { $in: hotelIds } })
-      .limit(5)
-      .select("checkInTime checkOutDate status createdAt hotelId")
-      .sort({ checkInTime: -1 });
-
-    console.log(
-      "Sample guest data:",
-      sampleGuests.map((g) => ({
-        checkInTime: g.checkInTime?.toISOString(),
-        checkOutDate: g.checkOutDate?.toISOString(),
-        status: g.status,
-        createdAt: g.createdAt?.toISOString(),
-        hotelId: g.hotelId?.toString(),
-      }))
-    );
-
-    // Count all check-ins and check-outs that occurred in the period
-    const [totalCheckins, totalCheckouts, totalGuests] = await Promise.all([
-      // Count all guests who checked in during the period (regardless of current status)
+    // FIXED: Count check-ins (guest records), check-outs (guest records), and ACTUAL guests (sum of guestCount)
+    const [
+      checkinsResult,
+      checkoutsResult,
+      totalGuestsResult,
+      guestRecordsCount,
+    ] = await Promise.all([
+      // Count check-in records
       Guest.countDocuments({
         hotelId: { $in: hotelIds },
         checkInTime: { $gte: startDate, $lte: endDate },
       }),
 
-      // Count all guests who checked out during the period
+      // Count check-out records
       Guest.countDocuments({
         hotelId: { $in: hotelIds },
         checkOutDate: { $gte: startDate, $lte: endDate },
         status: "checked-out",
       }),
 
-      // Total unique guests in the period
+      // FIXED: Sum the guestCount field to get actual number of guests
+      Guest.aggregate([
+        {
+          $match: {
+            hotelId: { $in: hotelIds },
+            checkInTime: { $gte: startDate, $lte: endDate },
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            totalGuests: { $sum: { $ifNull: ["$guestCount", 1] } }, // Use guestCount or default to 1
+          },
+        },
+      ]),
+
+      // For debugging: also count total guest records
       Guest.countDocuments({
         hotelId: { $in: hotelIds },
         checkInTime: { $gte: startDate, $lte: endDate },
       }),
     ]);
 
+    const totalCheckins = checkinsResult;
+    const totalCheckouts = checkoutsResult;
+    const totalGuests = totalGuestsResult[0]?.totalGuests || 0; // FIXED: Use aggregated sum
     const totalAccommodations = hotelIds.length;
 
-    console.log("Stats calculated:", {
+    console.log("FIXED Stats calculated:", {
       totalCheckins,
       totalCheckouts,
       totalAccommodations,
-      totalGuests,
+      totalGuests, // This should now be 2 instead of 1
+      guestRecordsCount, // This will be 1 (for debugging)
       dateRange: {
         startDate: startDate.toISOString(),
         endDate: endDate.toISOString(),
@@ -144,8 +148,8 @@ exports.getAreaWideStats = async (req, res) => {
         totalCheckins,
         totalCheckouts,
         totalAccommodations,
-        totalGuests,
-        // Include metadata for debugging
+        totalGuests, // FIXED: Now correctly sums guestCount
+        totalGuestRecords: guestRecordsCount, // For debugging
         metadata: {
           period,
           startDate: startDate.toISOString(),
@@ -164,7 +168,7 @@ exports.getAreaWideStats = async (req, res) => {
   }
 };
 
-// Enhanced getAllHotelsStats with better error handling
+// FIXED: Enhanced getAllHotelsStats with correct guest counting
 exports.getAllHotelsStats = async (req, res) => {
   try {
     console.log("getAllHotelsStats called with query:", req.query);
@@ -172,11 +176,6 @@ exports.getAllHotelsStats = async (req, res) => {
     const { period = "today", city, category } = req.query;
     const startDate = getStartOfPeriod(period);
     const endDate = new Date();
-
-    console.log("Hotel stats date range:", {
-      startDate: startDate.toISOString(),
-      endDate: endDate.toISOString(),
-    });
 
     let hotelQuery = { isActive: true };
 
@@ -201,26 +200,52 @@ exports.getAllHotelsStats = async (req, res) => {
     const hotelStats = await Promise.all(
       hotels.map(async (hotel) => {
         try {
-          const [checkins, checkouts, totalGuests] = await Promise.all([
-            // Count all check-ins during the period
-            Guest.countDocuments({
-              hotelId: hotel._id,
-              checkInTime: { $gte: startDate, $lte: endDate },
-            }),
+          const [checkins, checkouts, totalGuestsResult, guestRecords] =
+            await Promise.all([
+              // Count check-in records
+              Guest.countDocuments({
+                hotelId: hotel._id,
+                checkInTime: { $gte: startDate, $lte: endDate },
+              }),
 
-            // Count all check-outs during the period
-            Guest.countDocuments({
-              hotelId: hotel._id,
-              checkOutDate: { $gte: startDate, $lte: endDate },
-              status: "checked-out",
-            }),
+              // Count check-out records
+              Guest.countDocuments({
+                hotelId: hotel._id,
+                checkOutDate: { $gte: startDate, $lte: endDate },
+                status: "checked-out",
+              }),
 
-            // Total guests in the period
-            Guest.countDocuments({
-              hotelId: hotel._id,
-              checkInTime: { $gte: startDate, $lte: endDate },
-            }),
-          ]);
+              // FIXED: Sum guestCount to get actual number of guests
+              Guest.aggregate([
+                {
+                  $match: {
+                    hotelId: hotel._id,
+                    checkInTime: { $gte: startDate, $lte: endDate },
+                  },
+                },
+                {
+                  $group: {
+                    _id: null,
+                    totalGuests: { $sum: { $ifNull: ["$guestCount", 1] } },
+                  },
+                },
+              ]),
+
+              // For debugging: count guest records
+              Guest.countDocuments({
+                hotelId: hotel._id,
+                checkInTime: { $gte: startDate, $lte: endDate },
+              }),
+            ]);
+
+          const totalGuests = totalGuestsResult[0]?.totalGuests || 0;
+
+          console.log(`Hotel ${hotel.name} stats:`, {
+            checkins,
+            checkouts,
+            totalGuests, // FIXED: Should be 2 for your sample data
+            guestRecords, // Will be 1 for debugging
+          });
 
           return {
             id: hotel._id.toString(),
@@ -231,15 +256,14 @@ exports.getAllHotelsStats = async (req, res) => {
             type: "hotel",
             checkins,
             checkouts,
-            totalGuests,
-            // Additional metadata
+            totalGuests, // FIXED: Now correctly sums guestCount
+            totalGuestRecords: guestRecords, // For debugging
             numberOfRooms: hotel.numberOfRooms || 0,
             ownerName: hotel.ownerName || "",
             phone: hotel.phone || "",
           };
         } catch (hotelError) {
           console.error(`Error processing hotel ${hotel.name}:`, hotelError);
-          // Return hotel with zero stats if there's an error
           return {
             id: hotel._id.toString(),
             name: hotel.name,
@@ -250,6 +274,7 @@ exports.getAllHotelsStats = async (req, res) => {
             checkins: 0,
             checkouts: 0,
             totalGuests: 0,
+            totalGuestRecords: 0,
             error: "Failed to calculate stats",
           };
         }
@@ -262,15 +287,18 @@ exports.getAllHotelsStats = async (req, res) => {
         checkins: acc.checkins + hotel.checkins,
         checkouts: acc.checkouts + hotel.checkouts,
         totalGuests: acc.totalGuests + hotel.totalGuests,
+        totalGuestRecords:
+          acc.totalGuestRecords + (hotel.totalGuestRecords || 0),
       }),
-      { checkins: 0, checkouts: 0, totalGuests: 0 }
+      { checkins: 0, checkouts: 0, totalGuests: 0, totalGuestRecords: 0 }
     );
 
-    console.log("Hotel stats summary:", {
+    console.log("FIXED Hotel stats summary:", {
       hotelCount: hotelStats.length,
       totalCheckins: totalStats.checkins,
       totalCheckouts: totalStats.checkouts,
-      totalGuests: totalStats.totalGuests,
+      totalGuests: totalStats.totalGuests, // Should now be correct
+      totalGuestRecords: totalStats.totalGuestRecords,
     });
 
     res.json({
@@ -353,7 +381,7 @@ exports.getHotelGuests = async (req, res) => {
     const limitNum = parseInt(limit);
 
     // Get guests and total count
-    const [guests, totalCount] = await Promise.all([
+    const [guests, totalCount, totalGuestsSum] = await Promise.all([
       Guest.find(query)
         .select(
           "name phone checkInTime checkOutDate status roomNumber nationality purpose guestCount totalAmount"
@@ -363,9 +391,26 @@ exports.getHotelGuests = async (req, res) => {
         .limit(limitNum),
 
       Guest.countDocuments(query),
+
+      // FIXED: Also get the sum of actual guests
+      Guest.aggregate([
+        { $match: query },
+        {
+          $group: {
+            _id: null,
+            totalActualGuests: { $sum: { $ifNull: ["$guestCount", 1] } },
+          },
+        },
+      ]),
     ]);
 
-    console.log("Found guests:", guests.length, "Total:", totalCount);
+    const totalActualGuests = totalGuestsSum[0]?.totalActualGuests || 0;
+
+    console.log("Found guests:", {
+      guestRecords: guests.length,
+      totalRecords: totalCount,
+      totalActualGuests, // FIXED: Sum of guestCount
+    });
 
     res.json({
       success: true,
@@ -374,6 +419,7 @@ exports.getHotelGuests = async (req, res) => {
         currentPage: parseInt(page),
         totalPages: Math.ceil(totalCount / limitNum),
         totalCount,
+        totalActualGuests, // FIXED: Include actual guest count
         limit: limitNum,
         hasNext: skip + guests.length < totalCount,
         hasPrev: page > 1,
@@ -399,185 +445,8 @@ exports.getHotelGuests = async (req, res) => {
   }
 };
 
-// New function: Get detailed statistics for a specific hotel
-exports.getHotelDetailedStats = async (req, res) => {
-  try {
-    const { hotelId } = req.params;
-    const { period = "today" } = req.query;
-
-    if (!hotelId) {
-      return res.status(400).json({
-        success: false,
-        message: "Hotel ID is required",
-      });
-    }
-
-    const startDate = getStartOfPeriod(period);
-    const endDate = new Date();
-
-    // Get hotel info
-    const hotel = await Hotel.findById(hotelId);
-    if (!hotel) {
-      return res.status(404).json({
-        success: false,
-        message: "Hotel not found",
-      });
-    }
-
-    // Get detailed statistics
-    const [
-      checkins,
-      checkouts,
-      currentlyCheckedIn,
-      totalRevenue,
-      occupancyRate,
-      averageStayDuration,
-      nationalityBreakdown,
-      purposeBreakdown,
-    ] = await Promise.all([
-      Guest.countDocuments({
-        hotelId,
-        checkInTime: { $gte: startDate, $lte: endDate },
-      }),
-
-      Guest.countDocuments({
-        hotelId,
-        checkOutDate: { $gte: startDate, $lte: endDate },
-        status: "checked-out",
-      }),
-
-      Guest.countDocuments({
-        hotelId,
-        status: "checked-in",
-      }),
-
-      Guest.aggregate([
-        {
-          $match: {
-            hotelId: hotel._id,
-            checkOutDate: { $gte: startDate, $lte: endDate },
-            status: "checked-out",
-          },
-        },
-        {
-          $group: {
-            _id: null,
-            total: { $sum: "$totalAmount" },
-          },
-        },
-      ]),
-
-      // Calculate occupancy rate (if numberOfRooms is available)
-      hotel.numberOfRooms
-        ? Guest.countDocuments({ hotelId, status: "checked-in" }).then(
-            (occupied) => Math.round((occupied / hotel.numberOfRooms) * 100)
-          )
-        : 0,
-
-      // Average stay duration for checked-out guests
-      Guest.aggregate([
-        {
-          $match: {
-            hotelId: hotel._id,
-            status: "checked-out",
-            checkOutDate: { $gte: startDate, $lte: endDate },
-          },
-        },
-        {
-          $project: {
-            duration: {
-              $divide: [
-                { $subtract: ["$checkOutDate", "$checkInTime"] },
-                1000 * 60 * 60 * 24, // Convert to days
-              ],
-            },
-          },
-        },
-        {
-          $group: {
-            _id: null,
-            averageDuration: { $avg: "$duration" },
-          },
-        },
-      ]),
-
-      // Nationality breakdown
-      Guest.aggregate([
-        {
-          $match: {
-            hotelId: hotel._id,
-            checkInTime: { $gte: startDate, $lte: endDate },
-          },
-        },
-        {
-          $group: {
-            _id: "$nationality",
-            count: { $sum: 1 },
-          },
-        },
-        { $sort: { count: -1 } },
-        { $limit: 10 },
-      ]),
-
-      // Purpose breakdown
-      Guest.aggregate([
-        {
-          $match: {
-            hotelId: hotel._id,
-            checkInTime: { $gte: startDate, $lte: endDate },
-          },
-        },
-        {
-          $group: {
-            _id: "$purpose",
-            count: { $sum: 1 },
-          },
-        },
-        { $sort: { count: -1 } },
-        { $limit: 10 },
-      ]),
-    ]);
-
-    res.json({
-      success: true,
-      data: {
-        hotel: {
-          id: hotel._id,
-          name: hotel.name,
-          address: hotel.address,
-          numberOfRooms: hotel.numberOfRooms || 0,
-          category: hotel.category || "Standard",
-        },
-        statistics: {
-          checkins,
-          checkouts,
-          currentlyCheckedIn,
-          totalRevenue: totalRevenue[0]?.total || 0,
-          occupancyRate,
-          averageStayDuration: averageStayDuration[0]?.averageDuration || 0,
-          nationalityBreakdown,
-          purposeBreakdown,
-        },
-        period: {
-          type: period,
-          startDate: startDate.toISOString(),
-          endDate: endDate.toISOString(),
-        },
-      },
-    });
-  } catch (error) {
-    console.error("Error in getHotelDetailedStats:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to get detailed hotel statistics",
-      error: error.message,
-    });
-  }
-};
-
 module.exports = {
   getAreaWideStats: exports.getAreaWideStats,
   getAllHotelsStats: exports.getAllHotelsStats,
   getHotelGuests: exports.getHotelGuests,
-  getHotelDetailedStats: exports.getHotelDetailedStats,
 };

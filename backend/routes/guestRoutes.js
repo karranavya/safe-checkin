@@ -1,4 +1,4 @@
-// routes/guestRoutes.js
+// routes/guestRoutes.js - Updated with better email validation
 const express = require("express");
 const router = express.Router();
 const { body } = require("express-validator");
@@ -33,11 +33,12 @@ const checkInValidation = [
     .trim()
     .notEmpty()
     .withMessage("Phone number is required")
-    .matches(/^[\+]?[1-9][\d]{9,14}$/)
-    .withMessage("Please provide a valid phone number"),
+    .isLength({ min: 10, max: 15 })
+    .matches(/^[\+]?[\d]{10,15}$/)
+    .withMessage("Please provide a valid phone number (10-15 digits)"),
 
   body("email")
-    .optional()
+    .optional({ checkFalsy: true }) // This will skip validation for empty strings
     .trim()
     .isEmail()
     .withMessage("Please provide a valid email address"),
@@ -92,8 +93,9 @@ const checkInValidation = [
     .notEmpty()
     .withMessage("ID number is required"),
 
+  // Updated guest email validation to handle empty strings properly
   body("guests.*.email")
-    .optional()
+    .optional({ checkFalsy: true }) // This will skip validation for empty strings
     .trim()
     .isEmail()
     .withMessage("Please provide a valid email address for guest"),
@@ -107,6 +109,26 @@ const checkInValidation = [
     .optional()
     .isNumeric()
     .withMessage("Advance amount must be a number"),
+
+  // Add custom validation for guest count matching
+  body().custom((value, { req }) => {
+    const {
+      guestCount,
+      maleGuests = 0,
+      femaleGuests = 0,
+      childGuests = 0,
+    } = req.body;
+    const total = parseInt(guestCount);
+    const sum =
+      parseInt(maleGuests) + parseInt(femaleGuests) + parseInt(childGuests);
+
+    if (sum !== total) {
+      throw new Error(
+        `Guest count mismatch: total (${total}) should equal sum of male (${maleGuests}), female (${femaleGuests}), and child (${childGuests}) guests`
+      );
+    }
+    return true;
+  }),
 ];
 
 // Check-out validation
@@ -139,11 +161,11 @@ const updateValidation = [
   body("phone")
     .optional()
     .trim()
-    .matches(/^[\+]?[1-9][\d]{9,14}$/)
+    .matches(/^[\+]?[\d]{10,15}$/)
     .withMessage("Please provide a valid phone number"),
 
   body("email")
-    .optional()
+    .optional({ checkFalsy: true })
     .trim()
     .isEmail()
     .withMessage("Please provide a valid email address"),

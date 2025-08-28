@@ -1,56 +1,73 @@
-import { useEffect, useState } from 'react';
-import { Outlet, useNavigate } from 'react-router-dom';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Checkbox } from '@/components/ui/checkbox';
-import { ThemeToggle } from '@/components/ui/theme-toggle';
-import { AutoRefresh } from '@/components/ui/auto-refresh';
-import { Sidebar } from './Sidebar';
-import { LogOut, Menu, X } from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
+import { useEffect, useState } from "react";
+import { Outlet, useNavigate } from "react-router-dom";
+import { usePoliceAuth } from "@/contexts/PoliceAuthContext"; // ADD THIS IMPORT
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
+import { AutoRefresh } from "@/components/ui/auto-refresh";
+import { Sidebar } from "./Sidebar";
+import { LogOut, Menu, X, User } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 
 export const DashboardLayout = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [filters, setFilters] = useState({
-    district: '',
-    zone: '',
-    division: '',
-    area: '',
+    district: "",
+    zone: "",
+    division: "",
+    area: "",
     saveForFuture: false,
   });
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { user, logout, isAuthenticated, isLoading } = usePoliceAuth(); // USE CONTEXT
 
   useEffect(() => {
-    // Check authentication
-    const auth = localStorage.getItem('police-dashboard-auth');
-    if (!auth) {
-      navigate('/');
+    // Check authentication using context instead of localStorage directly
+    if (!isLoading && !isAuthenticated) {
+      console.log("Not authenticated in DashboardLayout, redirecting...");
+      navigate("/", { replace: true });
       return;
     }
 
     // Load saved filters
-    const savedFilters = localStorage.getItem('police-dashboard-filters');
+    const savedFilters = localStorage.getItem("police-dashboard-filters");
     if (savedFilters) {
-      setFilters(JSON.parse(savedFilters));
+      try {
+        setFilters(JSON.parse(savedFilters));
+      } catch (error) {
+        console.error("Error parsing saved filters:", error);
+      }
     }
-  }, [navigate]);
+  }, [navigate, isAuthenticated, isLoading]);
 
   const handleLogout = () => {
-    localStorage.removeItem('police-dashboard-auth');
-    localStorage.removeItem('police-dashboard-remember');
+    // Use context logout instead of manual localStorage removal
+    logout();
+
+    // Clean up additional stored data
+    localStorage.removeItem("police-dashboard-filters");
+
     toast({
       title: "Logged Out",
       description: "You have been logged out successfully.",
     });
-    navigate('/');
+
+    navigate("/", { replace: true });
   };
 
   const handleFilterSubmit = () => {
     if (filters.saveForFuture) {
-      localStorage.setItem('police-dashboard-filters', JSON.stringify(filters));
+      localStorage.setItem("police-dashboard-filters", JSON.stringify(filters));
     }
     toast({
       title: "Filters Applied",
@@ -58,13 +75,30 @@ export const DashboardLayout = () => {
     });
   };
 
+  // Show loading spinner while authentication is being checked
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4">Loading dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Don't render anything if not authenticated (will redirect)
+  if (!isAuthenticated) {
+    return null;
+  }
+
   return (
     <div className="min-h-screen bg-background flex">
       <AutoRefresh />
-      
+
       {/* Sidebar */}
       <Sidebar open={sidebarOpen} onOpenChange={setSidebarOpen} />
-      
+
       {/* Overlay */}
       {sidebarOpen && (
         <div
@@ -85,23 +119,40 @@ export const DashboardLayout = () => {
                 onClick={() => setSidebarOpen(!sidebarOpen)}
                 className="lg:hidden rounded-full"
               >
-                {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+                {sidebarOpen ? (
+                  <X className="h-5 w-5" />
+                ) : (
+                  <Menu className="h-5 w-5" />
+                )}
               </Button>
-              
+
               <img
                 src="/lovable-uploads/9d9969a7-cbda-48a5-a664-db7cd40ca9fa.png"
                 alt="Safe CheckIn"
                 className="h-8 w-auto"
               />
-              
+
               <h1 className="text-xl font-bold text-primary hidden sm:block">
                 Police Dashboard
               </h1>
             </div>
 
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-4">
+              {/* User Info */}
+              {user && (
+                <div className="hidden md:flex items-center space-x-2 text-sm">
+                  <User className="h-4 w-4" />
+                  <div className="text-right">
+                    <div className="font-medium">{user.name}</div>
+                    <div className="text-muted-foreground text-xs">
+                      {user.rank} • {user.badgeNumber}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <ThemeToggle />
-              
+
               <Button
                 variant="destructive"
                 size="sm"
@@ -119,7 +170,12 @@ export const DashboardLayout = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
               <div className="space-y-2">
                 <Label htmlFor="district">District</Label>
-                <Select value={filters.district} onValueChange={(value) => setFilters(prev => ({ ...prev, district: value }))}>
+                <Select
+                  value={filters.district}
+                  onValueChange={(value) =>
+                    setFilters((prev) => ({ ...prev, district: value }))
+                  }
+                >
                   <SelectTrigger className="rounded-xl">
                     <SelectValue placeholder="Select District" />
                   </SelectTrigger>
@@ -134,7 +190,12 @@ export const DashboardLayout = () => {
 
               <div className="space-y-2">
                 <Label htmlFor="zone">Zone</Label>
-                <Select value={filters.zone} onValueChange={(value) => setFilters(prev => ({ ...prev, zone: value }))}>
+                <Select
+                  value={filters.zone}
+                  onValueChange={(value) =>
+                    setFilters((prev) => ({ ...prev, zone: value }))
+                  }
+                >
                   <SelectTrigger className="rounded-xl">
                     <SelectValue placeholder="Select Zone" />
                   </SelectTrigger>
@@ -149,7 +210,12 @@ export const DashboardLayout = () => {
 
               <div className="space-y-2">
                 <Label htmlFor="division">Division</Label>
-                <Select value={filters.division} onValueChange={(value) => setFilters(prev => ({ ...prev, division: value }))}>
+                <Select
+                  value={filters.division}
+                  onValueChange={(value) =>
+                    setFilters((prev) => ({ ...prev, division: value }))
+                  }
+                >
                   <SelectTrigger className="rounded-xl">
                     <SelectValue placeholder="Select Division" />
                   </SelectTrigger>
@@ -164,7 +230,12 @@ export const DashboardLayout = () => {
 
               <div className="space-y-2">
                 <Label htmlFor="area">Area</Label>
-                <Select value={filters.area} onValueChange={(value) => setFilters(prev => ({ ...prev, area: value }))}>
+                <Select
+                  value={filters.area}
+                  onValueChange={(value) =>
+                    setFilters((prev) => ({ ...prev, area: value }))
+                  }
+                >
                   <SelectTrigger className="rounded-xl">
                     <SelectValue placeholder="Select Area" />
                   </SelectTrigger>
@@ -183,7 +254,12 @@ export const DashboardLayout = () => {
                 <Checkbox
                   id="saveFilters"
                   checked={filters.saveForFuture}
-                  onCheckedChange={(checked) => setFilters(prev => ({ ...prev, saveForFuture: checked as boolean }))}
+                  onCheckedChange={(checked) =>
+                    setFilters((prev) => ({
+                      ...prev,
+                      saveForFuture: checked as boolean,
+                    }))
+                  }
                 />
                 <Label htmlFor="saveFilters" className="text-sm">
                   Save filters for future use
@@ -194,7 +270,7 @@ export const DashboardLayout = () => {
                 onClick={handleFilterSubmit}
                 className="bg-gradient-primary hover:opacity-90 rounded-xl"
               >
-                Submit
+                Apply Filters
               </Button>
             </div>
           </div>

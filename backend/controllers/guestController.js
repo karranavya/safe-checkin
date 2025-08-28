@@ -7,6 +7,7 @@ const { validationResult } = require("express-validator");
 const checkInGuest = async (req, res) => {
   try {
     const errors = validationResult(req);
+    // console.log("Validation errors:", errors.array());
     if (!errors.isEmpty()) {
       return res.status(400).json({
         success: false,

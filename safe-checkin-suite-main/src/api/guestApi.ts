@@ -232,3 +232,46 @@ export const deleteGuest = async (guestId: string) => {
     throw new Error("Failed to delete guest");
   }
 };
+export const checkInGuestUpdated = async (guestData: any) => {
+  try {
+    console.log("Sending guest data:", JSON.stringify(guestData, null, 2));
+
+    // Validate required fields before sending
+    const requiredFields = [
+      "name",
+      "phone",
+      "nationality",
+      "purpose",
+      "guestCount",
+      "bookingMode",
+      "roomNumber",
+      "guests",
+    ];
+    for (const field of requiredFields) {
+      if (!guestData[field]) {
+        throw new Error(`Missing required field: ${field}`);
+      }
+    }
+
+    const response = await api.post("/checkin", guestData);
+    console.log("Check-in response:", response.data);
+    return response.data;
+  } catch (error: any) {
+    console.error("Full error object:", error);
+
+    if (error.response) {
+      // Server responded with error status
+      console.error("Response status:", error.response.status);
+      console.error("Response data:", error.response.data);
+      console.error("Response headers:", error.response.headers);
+    } else if (error.request) {
+      // Request was made but no response received
+      console.error("No response received:", error.request);
+    } else {
+      // Something else happened
+      console.error("Error message:", error.message);
+    }
+
+    throw error;
+  }
+};

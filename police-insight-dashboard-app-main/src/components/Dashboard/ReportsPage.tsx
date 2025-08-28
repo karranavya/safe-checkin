@@ -388,17 +388,54 @@ export default function ReportsPage() {
     with ${totalGuests} total guests.`;
   };
   const debugData = () => {
-    console.log("Current data state:", {
-      areaStats,
-      hotelsData,
-      reportType,
-      selectedHotels,
+    console.log("=== HOTEL REPORTS DEBUG ===");
+    console.log("Hotels fetched from API:", hotelsData.length);
+    console.log("Raw hotels data:", hotelsData);
+
+    // Detailed hotel analysis
+    hotelsData.forEach((hotel, index) => {
+      console.log(`Hotel ${index + 1}:`, {
+        id: hotel.id,
+        name: hotel.name,
+        city: hotel.city,
+        checkins: hotel.checkins,
+        checkouts: hotel.checkouts,
+        totalGuests: hotel.totalGuests,
+        category: hotel.category,
+        type: hotel.type,
+      });
+    });
+
+    console.log("Current filters:", { period, city, category });
+    console.log("Report type:", reportType);
+    console.log("Selected hotels:", selectedHotels);
+    console.log("Area stats:", areaStats);
+
+    // Calculate totals manually for verification
+    const manualCheckins = hotelsData.reduce((sum, h) => sum + h.checkins, 0);
+    const manualCheckouts = hotelsData.reduce((sum, h) => sum + h.checkouts, 0);
+    const manualTotalGuests = hotelsData.reduce(
+      (sum, h) => sum + h.totalGuests,
+      0
+    );
+
+    console.log("Manual calculations:", {
+      totalHotels: hotelsData.length,
+      totalCheckins: manualCheckins,
+      totalCheckouts: manualCheckouts,
+      totalGuests: manualTotalGuests,
+    });
+
+    console.log("Displayed totals:", {
       totalCheckins,
       totalCheckouts,
       totalAccommodations,
       totalGuests,
     });
+
+    console.log("=== END DEBUG ===");
   };
+
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-7xl mx-auto space-y-6">
@@ -433,7 +470,7 @@ export default function ReportsPage() {
         </div>
 
         {/* Debug Info */}
-        {/* {debugInfo && (
+        {debugInfo && (
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
             <div className="flex items-center gap-2 text-blue-700 text-sm">
               <AlertCircle className="h-4 w-4" />
@@ -446,7 +483,7 @@ export default function ReportsPage() {
           className="px-3 py-1 bg-gray-200 text-gray-700 rounded text-sm"
         >
           Debug Data
-        </button> */}
+        </button>
 
         {/* Error Display */}
         {error && (
