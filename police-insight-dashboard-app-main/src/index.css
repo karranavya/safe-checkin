@@ -6,6 +6,38 @@
 
 @layer base {
   :root {
+    /* Telangana Police Official Colors */
+    --police-navy: #1e3a5f;
+    --police-red: #dc2626;
+    --police-gold: #f59e0b;
+    --police-black: #1f2937;
+    --police-cyan: #0ea5e9;
+
+    /* Accommodation Colors */
+    --hotel: 59 130 246; /* blue-500 */
+    --lodge: 5 150 105; /* emerald-600 */
+    --guest-house: 124 58 237; /* violet-600 */
+    --dormitory: 245 158 11; /* amber-500 */
+    --pg: 220 38 38; /* red-600 */
+    --service-apartment: 14 165 233; /* cyan-500 */
+    --hostel: 101 163 13; /* lime-600 */
+    --rental-house: 190 24 93; /* pink-700 */
+
+    /* Gradients */
+    --gradient-primary: linear-gradient(135deg, #1e3a5f 0%, #0ea5e9 100%);
+    --gradient-card: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
+
+    /* Shadows */
+    --shadow-police: 0 10px 25px -5px rgba(30, 58, 95, 0.3),
+      0 4px 6px -2px rgba(30, 58, 95, 0.1);
+    --shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.1),
+      0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    --shadow-badge: 0 4px 14px 0 rgba(245, 158, 11, 0.39);
+
+    /* Border Radius */
+    --radius: 0.5rem;
+    --radius-lg: 1rem;
+    --radius-xl: 1.5rem;
     /* Light Mode - Vibrant Police Theme */
     --background: 240 100% 99%;
     --foreground: 224 71% 4%;
@@ -53,9 +85,17 @@
     --radius-xl: 2rem;
 
     /* Gradients */
-    --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--secondary)));
-    --gradient-card: linear-gradient(135deg, hsl(var(--card)), hsl(240 100% 99%));
-    
+    --gradient-primary: linear-gradient(
+      135deg,
+      hsl(var(--primary)),
+      hsl(var(--secondary))
+    );
+    --gradient-card: linear-gradient(
+      135deg,
+      hsl(var(--card)),
+      hsl(240 100% 99%)
+    );
+
     /* Shadows */
     --shadow-glow: 0 0 20px hsl(var(--primary) / 0.15);
     --shadow-card: 0 10px 25px -5px hsl(220 13% 91% / 0.5);
@@ -65,13 +105,13 @@
     --transition-bounce: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
 
     /* Accommodation type colors */
-    --hotel: 217 91% 60%;        /* Blue */
-    --lodge: 142 76% 36%;        /* Green */
-    --guest-house: 258 90% 66%;  /* Purple */
-    --dormitory: 43 96% 56%;     /* Orange */
-    --pg: 328 86% 70%;           /* Pink */
+    --hotel: 217 91% 60%; /* Blue */
+    --lodge: 142 76% 36%; /* Green */
+    --guest-house: 258 90% 66%; /* Purple */
+    --dormitory: 43 96% 56%; /* Orange */
+    --pg: 328 86% 70%; /* Pink */
     --service-apartment: 172 76% 41%; /* Teal */
-    --hostel: 0 84% 60%;         /* Red */
+    --hostel: 0 84% 60%; /* Red */
     --rental-house: 231 81% 60%; /* Indigo */
 
     --sidebar-background: 0 0% 98%;
@@ -134,9 +174,13 @@
     --ring: 217 91% 70%;
 
     /* Dark mode gradients */
-    --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--secondary)));
+    --gradient-primary: linear-gradient(
+      135deg,
+      hsl(var(--primary)),
+      hsl(var(--secondary))
+    );
     --gradient-card: linear-gradient(135deg, hsl(var(--card)), hsl(224 71% 8%));
-    
+
     /* Dark mode shadows */
     --shadow-glow: 0 0 20px hsl(var(--primary) / 0.3);
     --shadow-card: 0 10px 25px -5px hsl(0 0% 0% / 0.5);
@@ -150,6 +194,12 @@
     --sidebar-border: 224 71% 15%;
     --sidebar-ring: 217 91% 70%;
   }
+}
+
+/* Dark mode overrides if needed */
+.dark {
+  --police-navy: #2563eb;
+  --gradient-primary: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
 }
 
 @layer base {

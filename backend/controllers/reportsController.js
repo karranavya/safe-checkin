@@ -8,30 +8,28 @@ function getStartOfPeriod(period) {
 
   switch (period) {
     case "today": {
-      const utcNow = new Date(
-        now.toISOString().split("T")[0] + "T00:00:00.000Z"
-      );
-      return utcNow;
+      const start = new Date();
+      start.setHours(0, 0, 0, 0);
+      return start;
     }
     case "week": {
-      const utcNow = new Date(
-        now.toISOString().split("T")[0] + "T00:00:00.000Z"
-      );
-      const dayOfWeek = utcNow.getUTCDay();
-      const startOfWeek = new Date(utcNow);
-      startOfWeek.setUTCDate(utcNow.getUTCDate() - dayOfWeek);
-      return startOfWeek;
+      const start = new Date();
+      const dayOfWeek = start.getDay();
+      start.setDate(start.getDate() - dayOfWeek);
+      start.setHours(0, 0, 0, 0);
+      return start;
     }
     case "month": {
-      const year = now.getUTCFullYear();
-      const month = now.getUTCMonth();
-      return new Date(Date.UTC(year, month, 1, 0, 0, 0, 0));
+      const start = new Date();
+      start.setDate(1);
+      start.setHours(0, 0, 0, 0);
+      return start;
     }
     case "all": {
-      return new Date(2020, 0, 1);
+      return new Date(2020, 0, 1); // January 1, 2020
     }
     default:
-      return new Date(2000, 0, 1);
+      return new Date(2020, 0, 1);
   }
 }
 

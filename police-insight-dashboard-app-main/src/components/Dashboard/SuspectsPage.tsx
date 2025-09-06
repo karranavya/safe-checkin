@@ -11,6 +11,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import ViewSuspect from "./ViewSuspect";
+
 import { usePoliceAuth } from "@/contexts/PoliceAuthContext";
 import {
   Dialog,
@@ -43,33 +45,11 @@ import {
   RefreshCw,
 } from "lucide-react";
 
-// Mock suspects data (keeping this separate from alerts)
-const mockSuspects = [
-  {
-    id: 1,
-    name: "John Doe",
-    aadhar: "1234-5678-9012",
-    phone: "+91-9876543210",
-    vehicle: "MH-01-AB-1234",
-    photo: "/placeholder-avatar.jpg",
-    dateAdded: "2024-01-15",
-  },
-  {
-    id: 2,
-    name: "Jane Smith",
-    aadhar: "2345-6789-0123",
-    phone: "+91-8765432109",
-    vehicle: "MH-02-CD-5678",
-    photo: "/placeholder-avatar.jpg",
-    dateAdded: "2024-01-20",
-  },
-];
-
 type SortType = "name" | "date";
 type SortOrder = "asc" | "desc";
 
 export default function SuspectsPage() {
-  const [suspects, setSuspects] = useState(mockSuspects);
+  const [suspects, setSuspects] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [sortType, setSortType] = useState<SortType>("name");
@@ -87,6 +67,9 @@ export default function SuspectsPage() {
     priority: "all",
     type: "all",
   });
+  const [showViewSuspectModal, setShowViewSuspectModal] = useState(false);
+  const [selectedSuspectForView, setSelectedSuspectForView] =
+    useState<any>(null);
 
   // New suspect form data
   const [newSuspect, setNewSuspect] = useState({
@@ -97,6 +80,89 @@ export default function SuspectsPage() {
     photo: null as File | null,
   });
   const { token, user, isAuthenticated, isLoading } = usePoliceAuth();
+
+  // Fetch alerts when component mounts for suspects tab
+  useEffect(() => {
+    if (isAuthenticated && token) {
+      fetchAlerts();
+    }
+  }, [isAuthenticated, token]);
+
+  // Convert alerts with guest data to suspects
+  useEffect(() => {
+    const suspectsFromAlerts = alerts
+      .filter((alert) => alert.guest) // Only alerts with guest data
+      .map((alert) => ({
+        id: alert.guest.id || `alert-${alert.id}`,
+        name: alert.guest.name || "Unknown",
+        aadhar: alert.guest.aadhar || "Not Available",
+        phone: alert.guest.phone || "Not Available",
+        vehicle: alert.guest.vehicle || "",
+        photo: alert.guest.photo || "/placeholder-avatar.jpg",
+        dateAdded: alert.createdAt || new Date().toISOString(),
+        email: alert.guest.email || "",
+        age: alert.guest.age || null,
+        occupation: alert.guest.occupation || "",
+        address: alert.guest.address || "",
+        // Additional suspect-specific data
+        lastSeen: {
+          location: alert.location
+            ? `${alert.hotel?.name || "Hotel"} - Room ${
+                alert.location.roomNumber
+              }`
+            : alert.hotel?.name || "Unknown Location",
+          date: alert.createdAt,
+          reportedBy: alert.reportedBy || "Hotel Security System",
+        },
+        associatedAlerts: [
+          {
+            id: alert.id,
+            title: alert.title,
+            type: alert.type,
+            priority: alert.priority,
+            status: alert.status,
+            date: alert.createdAt,
+            location: alert.location
+              ? `Room ${alert.location.roomNumber}${
+                  alert.location.floor ? `, Floor ${alert.location.floor}` : ""
+                }`
+              : alert.hotel?.name || "Unknown",
+          },
+        ],
+        alertStatus: alert.status, // Track the alert status
+        alertPriority: alert.priority, // Track alert priority
+      }));
+
+    // Remove duplicates based on phone number or aadhar
+    const uniqueSuspects = suspectsFromAlerts.reduce((acc, current) => {
+      const existing = acc.find(
+        (suspect) =>
+          (suspect.phone !== "Not Available" &&
+            suspect.phone === current.phone) ||
+          (suspect.aadhar !== "Not Available" &&
+            suspect.aadhar === current.aadhar)
+      );
+
+      if (existing) {
+        // Merge alerts for the same suspect
+        existing.associatedAlerts = [
+          ...existing.associatedAlerts,
+          ...current.associatedAlerts,
+        ];
+        // Update last seen to most recent
+        if (
+          new Date(current.lastSeen.date) > new Date(existing.lastSeen.date)
+        ) {
+          existing.lastSeen = current.lastSeen;
+        }
+      } else {
+        acc.push(current);
+      }
+      return acc;
+    }, []);
+
+    setSuspects(uniqueSuspects);
+  }, [alerts]);
 
   // Fetch alerts from API
   useEffect(() => {
@@ -126,8 +192,8 @@ export default function SuspectsPage() {
       const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:5000";
       const fullUrl = `${apiUrl}/api/police/alerts?${params}`;
 
-      console.log("Fetching alerts from:", fullUrl); // Debug log
-      console.log("Using token:", token?.substring(0, 20) + "..."); // Debug log
+      console.log("Fetching alerts from:", fullUrl);
+      console.log("Using token:", token?.substring(0, 20) + "...");
 
       const response = await fetch(fullUrl, {
         headers: {
@@ -136,15 +202,15 @@ export default function SuspectsPage() {
         },
       });
 
-      console.log("Response status:", response.status); // Debug log
+      console.log("Response status:", response.status);
       console.log(
         "Response headers:",
         Object.fromEntries(response.headers.entries())
-      ); // Debug log
+      );
 
       // Check the actual response content before parsing
       const responseText = await response.text();
-      console.log("Raw response:", responseText.substring(0, 200) + "..."); // Debug log
+      console.log("Raw response:", responseText.substring(0, 200) + "...");
 
       if (response.ok) {
         try {
@@ -238,31 +304,12 @@ export default function SuspectsPage() {
   });
 
   const handleAddSuspect = async () => {
-    if (!newSuspect.name || !newSuspect.aadhar || !newSuspect.phone) {
-      return;
-    }
-
-    setIsSubmitting(true);
-
-    setTimeout(() => {
-      const suspect = {
-        id: Date.now(),
-        ...newSuspect,
-        photo: "/placeholder-avatar.jpg",
-        dateAdded: new Date().toISOString().split("T")[0],
-      };
-
-      setSuspects((prev) => [...prev, suspect]);
-      setNewSuspect({
-        name: "",
-        aadhar: "",
-        phone: "",
-        vehicle: "",
-        photo: null,
-      });
-      setShowAddModal(false);
-      setIsSubmitting(false);
-    }, 1000);
+    // Since suspects are now managed through alerts,
+    // this could create a new alert or redirect to alert creation
+    alert(
+      "Suspects are now managed through the Alert system. Please create an alert to add a new suspect."
+    );
+    setShowAddModal(false);
   };
 
   const handleDeleteSuspect = async () => {
@@ -270,17 +317,95 @@ export default function SuspectsPage() {
 
     setIsSubmitting(true);
 
-    setTimeout(() => {
+    // Since suspects come from alerts, you might want to mark associated alerts as resolved
+    try {
+      if (selectedSuspect.associatedAlerts) {
+        for (const alert of selectedSuspect.associatedAlerts) {
+          await updateAlertStatus(
+            alert.id,
+            "Resolved",
+            `Suspect removed: ${deleteReason}`
+          );
+        }
+      }
+
+      // Remove from local state
       setSuspects((prev) => prev.filter((s) => s.id !== selectedSuspect.id));
       setShowDeleteModal(false);
       setSelectedSuspect(null);
       setDeleteReason("");
+    } catch (error) {
+      console.error("Failed to delete suspect:", error);
+    } finally {
       setIsSubmitting(false);
-    }, 1000);
+    }
   };
 
   const formatAadhar = (aadhar: string) => {
     return aadhar.replace(/(\d{4})(\d{4})(\d{4})/, "$1-$2-$3");
+  };
+
+  const handleViewSuspect = (alert) => {
+    console.log("Eye button clicked for alert:", alert.id);
+    console.log("Alert data:", alert);
+
+    // Check if alert has guest information that we can convert to suspect format
+    if (alert.guest) {
+      console.log("Guest data found:", alert.guest);
+
+      // Convert guest info to suspect format for ViewSuspect component
+      const suspectData = {
+        id: alert.guest.id || `guest-${alert.id}`,
+        name: alert.guest.name || "Unknown",
+        aadhar: alert.guest.aadhar || "Not Available",
+        phone: alert.guest.phone || "Not Available",
+        vehicle: alert.guest.vehicle || "",
+        photo: alert.guest.photo || "/placeholder-avatar.jpg",
+        dateAdded: alert.createdAt || new Date().toISOString(),
+        email: alert.guest.email || "",
+        age: alert.guest.age || null,
+        occupation: alert.guest.occupation || "",
+        address: alert.guest.address || "",
+        // Add associated alerts array including current alert
+        associatedAlerts: [
+          {
+            id: alert.id,
+            title: alert.title,
+            type: alert.type,
+            priority: alert.priority,
+            status: alert.status,
+            date: alert.createdAt,
+            location: alert.location
+              ? `Room ${alert.location.roomNumber}${
+                  alert.location.floor ? `, Floor ${alert.location.floor}` : ""
+                }`
+              : alert.hotel?.name || "Unknown",
+          },
+        ],
+        // Add last seen information from the alert
+        lastSeen: {
+          location: alert.location
+            ? `${alert.hotel?.name || "Hotel"} - Room ${
+                alert.location.roomNumber
+              }`
+            : alert.hotel?.name || "Unknown Location",
+          date: alert.createdAt,
+          reportedBy: alert.reportedBy || "Hotel Security System",
+        },
+      };
+
+      console.log("Formatted suspect data:", suspectData);
+      console.log("Setting selectedSuspectForView and showing modal");
+
+      // Set the suspect data and show modal
+      setSelectedSuspectForView(suspectData);
+      setShowViewSuspectModal(true);
+    } else {
+      console.log("No guest data found, showing alert modal instead");
+      // Fallback to show alert details if no guest info
+      setSelectedAlert(alert);
+      setShowAlertModal(true);
+    }
   };
 
   return (
@@ -454,60 +579,133 @@ export default function SuspectsPage() {
             </Dialog>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {sortedSuspects.map((suspect) => (
-              <Card
-                key={suspect.id}
-                className="bg-white shadow-lg rounded-2xl border hover:shadow-xl transition-all duration-300"
-              >
-                <CardHeader className="pb-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-3">
-                      <div className="h-12 w-12 rounded-full bg-gray-100 flex items-center justify-center">
-                        <User className="h-6 w-6 text-gray-600" />
+          {loading ? (
+            <div className="text-center py-12">
+              <RefreshCw className="h-16 w-16 mx-auto text-gray-400 mb-4 animate-spin" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">
+                Loading Suspects...
+              </h3>
+              <p className="text-gray-500">
+                Fetching suspect data from active alerts.
+              </p>
+            </div>
+          ) : suspects.length === 0 ? (
+            <div className="text-center py-12">
+              <AlertTriangle className="h-16 w-16 mx-auto text-gray-400 mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">
+                No Suspects Found
+              </h3>
+              <p className="text-gray-500">
+                No suspects have been identified from current alerts.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {sortedSuspects.map((suspect) => (
+                <Card
+                  key={suspect.id}
+                  className="bg-white shadow-lg rounded-2xl border hover:shadow-xl transition-all duration-300"
+                >
+                  <CardHeader className="pb-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-3">
+                        <div className="h-12 w-12 rounded-full bg-gray-100 flex items-center justify-center">
+                          <User className="h-6 w-6 text-gray-600" />
+                        </div>
+                        <div>
+                          <CardTitle className="text-lg">
+                            {suspect.name}
+                          </CardTitle>
+                          <Badge variant="outline" className="text-xs">
+                            Added:{" "}
+                            {new Date(suspect.dateAdded).toLocaleDateString()}
+                          </Badge>
+                        </div>
                       </div>
-                      <div>
-                        <CardTitle className="text-lg">
-                          {suspect.name}
-                        </CardTitle>
-                        <Badge variant="outline" className="text-xs">
-                          Added:{" "}
-                          {new Date(suspect.dateAdded).toLocaleDateString()}
-                        </Badge>
-                      </div>
+                      <Button
+                        variant="destructive"
+                        size="icon"
+                        className="rounded-full h-8 w-8"
+                        onClick={() => {
+                          setSelectedSuspect(suspect);
+                          setShowDeleteModal(true);
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
                     </div>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="flex items-center space-x-2">
+                      <CreditCard className="h-4 w-4 text-gray-500" />
+                      <span className="text-sm">{suspect.aadhar}</span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Phone className="h-4 w-4 text-gray-500" />
+                      <span className="text-sm">{suspect.phone}</span>
+                    </div>
+                    {suspect.vehicle && (
+                      <div className="flex items-center space-x-2">
+                        <Car className="h-4 w-4 text-gray-500" />
+                        <span className="text-sm">{suspect.vehicle}</span>
+                      </div>
+                    )}
+
+                    {/* Show alert status and priority */}
+                    {suspect.alertStatus && (
+                      <div className="flex items-center space-x-2">
+                        <div className="flex items-center space-x-1">
+                          <Badge
+                            variant={
+                              suspect.alertStatus === "Resolved"
+                                ? "default"
+                                : "secondary"
+                            }
+                            className="text-xs"
+                          >
+                            {suspect.alertStatus}
+                          </Badge>
+                          <Badge
+                            className={`text-xs ${getPriorityColor(
+                              suspect.alertPriority
+                            )} text-white`}
+                          >
+                            {suspect.alertPriority}
+                          </Badge>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Show number of associated alerts */}
+                    {suspect.associatedAlerts &&
+                      suspect.associatedAlerts.length > 0 && (
+                        <div className="flex items-center space-x-2">
+                          <AlertTriangle className="h-4 w-4 text-orange-500" />
+                          <span className="text-sm text-orange-600">
+                            {suspect.associatedAlerts.length} Alert
+                            {suspect.associatedAlerts.length > 1 ? "s" : ""}
+                          </span>
+                        </div>
+                      )}
+
+                    {/* Add View Details button */}
                     <Button
-                      variant="destructive"
-                      size="icon"
-                      className="rounded-full h-8 w-8"
+                      variant="outline"
+                      size="sm"
+                      className="w-full mt-2"
                       onClick={() => {
-                        setSelectedSuspect(suspect);
-                        setShowDeleteModal(true);
+                        setSelectedSuspectForView(suspect);
+                        setShowViewSuspectModal(true);
                       }}
                     >
-                      <Trash2 className="h-4 w-4" />
+                      <Eye className="h-4 w-4 mr-2" />
+                      View Details
                     </Button>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="flex items-center space-x-2">
-                    <CreditCard className="h-4 w-4 text-gray-500" />
-                    <span className="text-sm">{suspect.aadhar}</span>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Phone className="h-4 w-4 text-gray-500" />
-                    <span className="text-sm">{suspect.phone}</span>
-                  </div>
-                  {suspect.vehicle && (
-                    <div className="flex items-center space-x-2">
-                      <Car className="h-4 w-4 text-gray-500" />
-                      <span className="text-sm">{suspect.vehicle}</span>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
         </TabsContent>
 
         {/* Alerts Tab */}
@@ -636,9 +834,10 @@ export default function SuspectsPage() {
                         variant="outline"
                         size="icon"
                         className="rounded-full h-8 w-8"
-                        onClick={() => {
-                          setSelectedAlert(alert);
-                          setShowAlertModal(true);
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleViewSuspect(alert);
                         }}
                       >
                         <Eye className="h-4 w-4" />
@@ -1071,6 +1270,22 @@ export default function SuspectsPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* View Suspect Modal - Placed at the end to avoid conflicts */}
+      {showViewSuspectModal && selectedSuspectForView && (
+        <ViewSuspect
+          isOpen={showViewSuspectModal}
+          onClose={() => {
+            console.log("Closing ViewSuspect modal");
+            setShowViewSuspectModal(false);
+            setSelectedSuspectForView(null);
+          }}
+          suspect={selectedSuspectForView}
+          onUpdateSuspect={(updatedSuspect) => {
+            console.log("Suspect updated:", updatedSuspect);
+          }}
+        />
+      )}
     </div>
   );
 }

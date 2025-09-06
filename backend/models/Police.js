@@ -29,6 +29,11 @@ const policeSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    role: {
+      type: String,
+      enum: ["admin", "sub-police"], // NEW
+      default: "sub-police",
+    },
     isActive: {
       type: Boolean,
       default: true,

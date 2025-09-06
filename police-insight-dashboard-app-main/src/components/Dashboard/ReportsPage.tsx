@@ -60,7 +60,7 @@ interface ApiResponse<T> {
 export default function ReportsPage() {
   const [reportType, setReportType] = useState<"area" | "specific">("area");
   const [selectedHotels, setSelectedHotels] = useState<string[]>([]);
-  const [period, setPeriod] = useState("week");
+  const [period, setPeriod] = useState("all");
   const [city, setCity] = useState("all");
   const [category, setCategory] = useState("all");
 
@@ -470,7 +470,7 @@ export default function ReportsPage() {
         </div>
 
         {/* Debug Info */}
-        {debugInfo && (
+        {/* {debugInfo && (
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
             <div className="flex items-center gap-2 text-blue-700 text-sm">
               <AlertCircle className="h-4 w-4" />
@@ -483,7 +483,7 @@ export default function ReportsPage() {
           className="px-3 py-1 bg-gray-200 text-gray-700 rounded text-sm"
         >
           Debug Data
-        </button>
+        </button> */}
 
         {/* Error Display */}
         {error && (

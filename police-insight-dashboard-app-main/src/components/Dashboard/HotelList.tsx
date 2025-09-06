@@ -75,17 +75,19 @@ const HotelList: React.FC = () => {
   });
 
   // Fetch hotels
+  // Fetch hotels
   const fetchHotels = async (page = 1, search = "", filterParams = filters) => {
     setLoading(true);
     setError("");
 
     try {
-      const policeAuth = JSON.parse(
-        localStorage.getItem("police-dashboard-auth") || "{}"
-      );
+      // FIXED: Get token from the correct locations
+      const token =
+        sessionStorage.getItem("policeToken") ||
+        localStorage.getItem("policeToken");
 
       // Check if token exists
-      if (!policeAuth.token) {
+      if (!token) {
         setError("Authentication required. Please login again.");
         setLoading(false);
         return;
@@ -105,7 +107,7 @@ const HotelList: React.FC = () => {
         `http://localhost:5000/api/hotels/all?${queryParams}`,
         {
           headers: {
-            Authorization: `Bearer ${policeAuth.token}`,
+            Authorization: `Bearer ${token}`, // FIXED: Use token directly
             "Content-Type": "application/json",
           },
         }
@@ -113,6 +115,9 @@ const HotelList: React.FC = () => {
 
       if (response.status === 401) {
         setError("Session expired. Please login again.");
+        // Clear both possible token locations
+        localStorage.removeItem("policeToken");
+        sessionStorage.removeItem("policeToken");
         localStorage.removeItem("police-dashboard-auth");
         setLoading(false);
         return;

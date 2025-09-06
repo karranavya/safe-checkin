@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { ThemeToggle } from "@/components/ui/theme-toggle";
 import {
   Home,
   FileText,
@@ -11,8 +10,12 @@ import {
   ChevronDown,
   ChevronRight,
   Building,
+  Shield,
+  AlertTriangle,
+  Clock,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { usePoliceAuth } from "@/contexts/PoliceAuthContext";
 import { cn } from "@/lib/utils";
 
 interface SidebarProps {
@@ -22,12 +25,13 @@ interface SidebarProps {
 
 export const Sidebar: React.FC<SidebarProps> = ({ open, onOpenChange }) => {
   const [reportsExpanded, setReportsExpanded] = useState(false);
+  const [hotelsExpanded, setHotelsExpanded] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { logout } = usePoliceAuth();
 
   const handleLogout = () => {
-    localStorage.removeItem("police-dashboard-auth");
-    localStorage.removeItem("police-dashboard-remember");
+    logout();
     toast({
       title: "Logged Out",
       description: "You have been logged out successfully.",
@@ -37,98 +41,132 @@ export const Sidebar: React.FC<SidebarProps> = ({ open, onOpenChange }) => {
 
   const sidebarItems = [
     {
-      title: "Dashboard",
+      title: "Command Center",
       icon: Home,
       href: "/dashboard",
       exact: true,
+      color: "text-white",
     },
     {
-      title: "Hotels",
-      icon: Building, // Import Building from lucide-react
+      title: "Hotel Registry",
+      icon: Building,
       href: "/dashboard/hotels",
+      color: "text-white",
       submenu: [
-        { title: "Register Hotel", href: "/dashboard/hotels/register" },
-        { title: "View Hotels", href: "/dashboard/hotels/list" },
+        {
+          title: "Register New Hotel",
+          href: "/dashboard/hotels/register",
+          icon: Building,
+        },
+        {
+          title: "All Registered Hotels",
+          href: "/dashboard/hotels/list",
+          icon: FileText,
+        },
       ],
     },
     {
-      title: "Reports",
+      title: "Intelligence Reports",
       icon: FileText,
       href: "/dashboard/reports",
+      color: "text-white",
       submenu: [
-        { title: "Area CheckIn wise", href: "/dashboard/reports/checkin" },
+        {
+          title: "Area Check-In Analysis",
+          href: "/dashboard/reports/checkin",
+          icon: AlertTriangle,
+        },
       ],
     },
     {
-      title: "Suspects",
+      title: "Suspect Database",
       icon: Users,
       href: "/dashboard/suspects",
+      color: "text-white",
     },
   ];
 
   return (
     <>
-      {/* Sidebar */}
+      {/* Fixed Sidebar */}
       <aside
         className={cn(
-          "fixed left-0 top-0 z-50 h-full w-80 bg-card shadow-card transform transition-transform duration-300 ease-in-out lg:relative lg:translate-x-0",
+          "fixed left-0 top-0 z-50 h-full w-80 shadow-2xl transform transition-transform duration-300 ease-in-out lg:translate-x-0",
+          // Gradient from dark blue (top) to light blue (bottom) matching dashboard header
+          "bg-gradient-to-b from-[#1e3a5f] to-[#0ea5e9]",
           open ? "translate-x-0" : "-translate-x-full"
         )}
       >
-        <div className="flex flex-col h-full">
+        <div className="flex flex-col h-full text-white">
           {/* Header */}
-          <div className="flex items-center justify-between p-4 border-b border-border">
-            <div className="flex items-center space-x-2">
-              <img
-                src="/lovable-uploads/9d9969a7-cbda-48a5-a664-db7cd40ca9fa.png"
-                alt="Safe CheckIn"
-                className="h-6 w-auto"
-              />
-              <span className="font-semibold text-foreground">Menu</span>
+          <div className="flex items-center justify-between p-6 border-b border-white/20">
+            <div className="flex items-center space-x-3">
+              <div className="p-2 bg-white/10 rounded-full">
+                <Shield className="h-6 w-6 text-white" />
+              </div>
+              <div>
+                <span className="font-bold text-lg text-white">
+                  Police Portal
+                </span>
+                <div className="text-xs text-white/70">Command & Control</div>
+              </div>
             </div>
             <Button
               variant="ghost"
               size="icon"
               onClick={() => onOpenChange(false)}
-              className="lg:hidden rounded-full"
+              className="lg:hidden text-white hover:bg-white/10"
             >
               <X className="h-4 w-4" />
             </Button>
           </div>
 
-          {/* Theme Toggle Section */}
-          <div className="p-4 border-b border-border">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-muted-foreground">
-                Theme
-              </span>
-              <ThemeToggle />
+          {/* Status Indicator */}
+          <div className="p-4 border-b border-white/20">
+            <div className="flex items-center justify-between text-sm">
+              <div className="flex items-center space-x-2">
+                <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                <span className="text-white/90">System Status</span>
+              </div>
+              <span className="text-yellow-300 font-medium">OPERATIONAL</span>
             </div>
           </div>
 
           {/* Navigation */}
-          <nav className="flex-1 p-4 space-y-2">
+          <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
             {sidebarItems.map((item) => (
               <div key={item.title}>
                 {item.submenu ? (
                   <>
                     <Button
                       variant="ghost"
-                      className="w-full justify-between rounded-xl hover:bg-accent"
-                      onClick={() => setReportsExpanded(!reportsExpanded)}
+                      className="w-full justify-between text-white hover:bg-white/10 border border-white/20 mb-2"
+                      onClick={() => {
+                        if (item.title === "Hotel Registry") {
+                          setHotelsExpanded(!hotelsExpanded);
+                        } else {
+                          setReportsExpanded(!reportsExpanded);
+                        }
+                      }}
                     >
                       <div className="flex items-center">
-                        <item.icon className="h-4 w-4 mr-3" />
-                        {item.title}
+                        <item.icon className="h-5 w-5 mr-3 text-white" />
+                        <span className="font-medium">{item.title}</span>
                       </div>
-                      {reportsExpanded ? (
+                      {(
+                        item.title === "Hotel Registry"
+                          ? hotelsExpanded
+                          : reportsExpanded
+                      ) ? (
                         <ChevronDown className="h-4 w-4" />
                       ) : (
                         <ChevronRight className="h-4 w-4" />
                       )}
                     </Button>
-                    {reportsExpanded && (
-                      <div className="ml-4 mt-2 space-y-1">
+                    {((item.title === "Hotel Registry" && hotelsExpanded) ||
+                      (item.title === "Intelligence Reports" &&
+                        reportsExpanded)) && (
+                      <div className="ml-4 mt-2 space-y-1 border-l border-white/20 pl-4">
                         {item.submenu.map((subItem) => (
                           <NavLink
                             key={subItem.href}
@@ -137,12 +175,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ open, onOpenChange }) => {
                               cn(
                                 "flex items-center px-3 py-2 text-sm rounded-lg transition-colors",
                                 isActive
-                                  ? "bg-primary text-primary-foreground"
-                                  : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                                  ? "bg-yellow-400 text-blue-900 shadow-lg font-medium"
+                                  : "text-white/80 hover:bg-white/10 hover:text-white"
                               )
                             }
                             onClick={() => onOpenChange(false)}
                           >
+                            <subItem.icon className="h-4 w-4 mr-3" />
                             {subItem.title}
                           </NavLink>
                         ))}
@@ -154,32 +193,38 @@ export const Sidebar: React.FC<SidebarProps> = ({ open, onOpenChange }) => {
                     to={item.href}
                     className={({ isActive }) =>
                       cn(
-                        "flex items-center px-3 py-2 rounded-xl transition-colors",
+                        "flex items-center px-4 py-3 rounded-lg transition-colors border border-white/20 mb-2",
                         isActive
-                          ? "bg-primary text-primary-foreground"
-                          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                          ? "bg-yellow-400 text-blue-900 shadow-lg font-medium"
+                          : "text-white hover:bg-white/10 hover:border-white/40"
                       )
                     }
                     onClick={() => onOpenChange(false)}
                     end={item.exact}
                   >
-                    <item.icon className="h-4 w-4 mr-3" />
-                    {item.title}
+                    <item.icon className="h-5 w-5 mr-3" />
+                    <span className="font-medium">{item.title}</span>
                   </NavLink>
                 )}
               </div>
             ))}
           </nav>
 
-          {/* Logout Button */}
-          <div className="p-4 border-t border-border">
+          {/* System Time */}
+          <div className="p-4 border-t border-white/20">
+            <div className="flex items-center space-x-2 text-white/80 text-xs mb-4">
+              <Clock className="h-3 w-3" />
+              <span>System Time: {new Date().toLocaleTimeString()}</span>
+            </div>
+
+            {/* Logout Button */}
             <Button
               variant="destructive"
-              className="w-full rounded-xl"
+              className="w-full bg-red-600 hover:bg-red-700 shadow-lg"
               onClick={handleLogout}
             >
               <LogOut className="h-4 w-4 mr-2" />
-              Log Out
+              Secure Logout
             </Button>
           </div>
         </div>
