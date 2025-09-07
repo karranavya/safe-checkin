@@ -1,4 +1,4 @@
-// components/Login/LoginPage.tsx - Complete with Police Authentication
+// components/Login/LoginPage.tsx - Complete with Role-Based Authentication
 import { useState } from "react";
 import React from "react";
 import { useNavigate } from "react-router-dom";
@@ -17,6 +17,7 @@ import {
 import { ForgotPasswordModal } from "./ForgotPasswordModal";
 import { useToast } from "@/hooks/use-toast";
 import { AutoRefresh } from "@/components/ui/auto-refresh";
+import { Shield, Crown, User } from "lucide-react";
 
 export const LoginPage = () => {
   const [email, setEmail] = useState("");
@@ -28,16 +29,15 @@ export const LoginPage = () => {
   const { toast } = useToast();
   const { login, isAuthenticated } = usePoliceAuth();
 
-  // Redirect if already authenticated
-
-  // Simplified handleLogin function
-  // In LoginPage.tsx - handleLogin function
+  // Role-based login handling
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
 
     try {
       const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:5000";
+
+      console.log("Attempting login to:", `${apiUrl}/api/police/login`);
 
       const response = await fetch(`${apiUrl}/api/police/login`, {
         method: "POST",
@@ -46,47 +46,47 @@ export const LoginPage = () => {
       });
 
       const data = await response.json();
+      console.log("Login response:", data);
 
       if (response.ok && data.success) {
-        // Store tokens
+        // Store tokens with role information
         const storage = rememberMe ? localStorage : sessionStorage;
+        storage.removeItem("policeToken");
+        storage.removeItem("police-dashboard-auth");
         storage.setItem("policeToken", data.token);
-        storage.setItem(
-          "police-dashboard-auth",
-          JSON.stringify({
-            token: data.token,
-            police: data.police,
-            officerId: data.police.id,
-            loginTime: Date.now(),
-          })
+        const authData = {
+          token: data.token,
+          police: data.police,
+          policeId: data.police.id, // Add this
+          officerId: data.police.id, // Keep for compatibility
+          role: data.police.role,
+          loginTime: Date.now(),
+        };
+        storage.setItem("police-dashboard-auth", JSON.stringify(authData));
+        console.log("=== STORING AUTH DATA ===");
+        console.log("authData:", authData);
+        console.log(
+          "Stored successfully:",
+          storage.getItem("police-dashboard-auth")
         );
-
+        console.log("=== END STORAGE ===");
         // Update context
         login(data.token, data.police);
 
+        // Role-based success message
+        const roleDisplay =
+          data.police.role === "admin_police" ? "Admin" : "Officer";
         toast({
           title: "Login Successful",
-          description: `Welcome back, ${data.police.name}!`,
+          description: `Welcome back, ${roleDisplay} ${data.police.name}!`,
         });
 
-        // FORCE NAVIGATION - Try all these approaches
-        console.log("About to navigate...");
+        // Role-based navigation
+        console.log("User role:", data.police.role);
 
-        // Method 1: Direct navigation with replace
         navigate("/dashboard", { replace: true });
-
-        // Method 2: If above doesn't work, try with setTimeout
-        setTimeout(() => {
-          console.log("Timeout navigation attempt");
-          navigate("/dashboard", { replace: true });
-        }, 100);
-
-        // Method 3: As a last resort, use window.location
-        setTimeout(() => {
-          console.log("Window location fallback");
-          window.location.href = "/dashboard";
-        }, 500);
       } else {
+        console.error("Login failed:", data);
         toast({
           title: "Login Failed",
           description: data.error || "Invalid credentials",
@@ -97,7 +97,7 @@ export const LoginPage = () => {
       console.error("Login error:", error);
       toast({
         title: "Login Error",
-        description: "Cannot connect to server",
+        description: "Cannot connect to server. Please check your connection.",
         variant: "destructive",
       });
     } finally {
@@ -105,16 +105,34 @@ export const LoginPage = () => {
     }
   };
 
-  // Quick fill for testing
+  // Quick fill for testing with role-based credentials
   const fillTestCredentials = (type: "admin" | "officer" | "inspector") => {
     const credentials = {
-      admin: { email: "admin@police.gov.in", password: "admin123" },
-      officer: { email: "officer@police.gov.in", password: "police123" },
-      inspector: { email: "inspector@police.gov.in", password: "inspect123" },
+      admin: {
+        email: "admin@police.gov.in",
+        password: "admin123",
+        role: "admin_police",
+      },
+      officer: {
+        email: "officer@police.gov.in",
+        password: "police123",
+        role: "sub_police",
+      },
+      inspector: {
+        email: "inspector@police.gov.in",
+        password: "inspect123",
+        role: "sub_police",
+      },
     };
 
     setEmail(credentials[type].email);
     setPassword(credentials[type].password);
+  };
+
+  // Debug navigation function
+  const debugNavigation = (route: string) => {
+    console.log(`Debug: Navigating to ${route}`);
+    navigate(route, { replace: true });
   };
 
   return (
@@ -134,30 +152,37 @@ export const LoginPage = () => {
         {/* Login Card */}
         <Card className="bg-gradient-card shadow-card border-0 rounded-2xl">
           <CardHeader className="space-y-1 text-center">
-            <CardTitle className="text-2xl font-bold text-primary">
-              Police Dashboard
+            <CardTitle className="text-2xl font-bold text-primary flex items-center justify-center gap-2">
+              <Shield className="h-6 w-6" />
+              Police Portal
             </CardTitle>
             <CardDescription className="text-muted-foreground">
-              Enter your credentials to access the dashboard
+              Secure access for law enforcement personnel
             </CardDescription>
           </CardHeader>
+
           <CardContent className="space-y-4">
             <form onSubmit={handleLogin} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="email">Email Address</Label>
+                <Label htmlFor="email" className="text-sm font-medium">
+                  Email Address
+                </Label>
                 <Input
                   id="email"
                   type="email"
-                  placeholder="Enter your email"
+                  placeholder="Enter your official email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="rounded-xl border-2 focus:border-primary"
                   required
+                  disabled={isLoading}
                 />
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
+                <Label htmlFor="password" className="text-sm font-medium">
+                  Password
+                </Label>
                 <Input
                   id="password"
                   type="password"
@@ -166,6 +191,7 @@ export const LoginPage = () => {
                   onChange={(e) => setPassword(e.target.value)}
                   className="rounded-xl border-2 focus:border-primary"
                   required
+                  disabled={isLoading}
                 />
               </div>
 
@@ -177,9 +203,10 @@ export const LoginPage = () => {
                     setRememberMe(checked as boolean)
                   }
                   className="rounded-md"
+                  disabled={isLoading}
                 />
                 <Label htmlFor="remember" className="text-sm font-medium">
-                  Remember Me
+                  Keep me signed in
                 </Label>
               </div>
 
@@ -188,44 +215,46 @@ export const LoginPage = () => {
                 className="w-full bg-gradient-primary hover:opacity-90 text-primary-foreground font-semibold py-3 rounded-xl transition-all duration-300 hover:scale-105 shadow-glow"
                 disabled={isLoading}
               >
-                {isLoading ? "Logging in..." : "Login"}
+                {isLoading ? (
+                  <div className="flex items-center justify-center">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                    Authenticating...
+                  </div>
+                ) : (
+                  "Secure Login"
+                )}
               </Button>
             </form>
-            <Button
-              type="button"
-              onClick={() => {
-                console.log("Manual navigation test");
-                navigate("/dashboard", { replace: true });
-              }}
-              className="w-full mt-2 bg-red-500 hover:bg-red-600"
-            >
-              DEBUG: Test Navigation
-            </Button>
+
             <div className="text-center">
               <button
                 type="button"
                 onClick={() => setShowForgotPassword(true)}
                 className="text-sm text-primary hover:text-primary-hover underline font-medium transition-colors"
+                disabled={isLoading}
               >
                 Forgot Password?
               </button>
             </div>
 
-            {/* Test Credentials Section */}
-            <div className="mt-6 p-4 bg-muted/50 rounded-lg">
-              <h4 className="text-sm font-semibold text-foreground mb-3">
-                Test Credentials (Development):
+            {/* Development Test Credentials Section */}
+            <div className="mt-6 p-4 bg-muted/50 rounded-lg border">
+              <h4 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+                <Shield className="h-4 w-4" />
+                Development Test Access:
               </h4>
 
               {/* Quick Fill Buttons */}
-              <div className="grid grid-cols-3 gap-2 mb-3">
+              <div className="grid grid-cols-3 gap-2 mb-4">
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   onClick={() => fillTestCredentials("admin")}
-                  className="text-xs"
+                  className="text-xs flex items-center justify-center gap-1"
+                  disabled={isLoading}
                 >
+                  <Crown className="h-3 w-3" />
                   Admin
                 </Button>
                 <Button
@@ -233,8 +262,10 @@ export const LoginPage = () => {
                   variant="outline"
                   size="sm"
                   onClick={() => fillTestCredentials("officer")}
-                  className="text-xs"
+                  className="text-xs flex items-center justify-center gap-1"
+                  disabled={isLoading}
                 >
+                  <User className="h-3 w-3" />
                   Officer
                 </Button>
                 <Button
@@ -242,28 +273,61 @@ export const LoginPage = () => {
                   variant="outline"
                   size="sm"
                   onClick={() => fillTestCredentials("inspector")}
-                  className="text-xs"
+                  className="text-xs flex items-center justify-center gap-1"
+                  disabled={isLoading}
                 >
+                  <Shield className="h-3 w-3" />
                   Inspector
                 </Button>
               </div>
 
-              <div className="space-y-1 text-xs text-muted-foreground">
-                <div>
-                  <strong>Admin:</strong> admin@police.gov.in / admin123
+              {/* Test Credentials Info */}
+              <div className="space-y-2 text-xs text-muted-foreground">
+                <div className="flex items-center gap-2">
+                  <Crown className="h-3 w-3 text-yellow-600" />
+                  <strong>Admin Police:</strong> admin@police.gov.in / admin123
                 </div>
-                <div>
-                  <strong>Officer:</strong> officer@police.gov.in / police123
+                <div className="flex items-center gap-2">
+                  <User className="h-3 w-3 text-blue-600" />
+                  <strong>Sub Police:</strong> officer@police.gov.in / police123
                 </div>
-                <div>
+                <div className="flex items-center gap-2">
+                  <Shield className="h-3 w-3 text-green-600" />
                   <strong>Inspector:</strong> inspector@police.gov.in /
                   inspect123
                 </div>
               </div>
 
-              <div className="mt-2 text-xs text-blue-600">
-                API URL:{" "}
-                {import.meta.env.VITE_API_URL || "http://localhost:5000"}
+              {/* System Info */}
+              <div className="mt-3 pt-3 border-t border-muted-foreground/20">
+                <div className="text-xs text-blue-600 mb-2">
+                  <strong>API Endpoint:</strong>{" "}
+                  {import.meta.env.VITE_API_URL || "http://localhost:5000"}
+                </div>
+
+                {/* Debug Navigation Buttons */}
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => debugNavigation("/dashboard")}
+                    className="text-xs flex-1"
+                    disabled={isLoading}
+                  >
+                    Test → Dashboard
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => debugNavigation("/admin-dashboard")}
+                    className="text-xs flex-1"
+                    disabled={isLoading}
+                  >
+                    Test → Admin
+                  </Button>
+                </div>
               </div>
             </div>
           </CardContent>
@@ -277,6 +341,14 @@ export const LoginPage = () => {
             alt="Deltamarch"
             className="mx-auto h-8 w-auto opacity-70"
           />
+        </div>
+
+        {/* System Status */}
+        <div className="text-center">
+          <div className="inline-flex items-center gap-2 px-3 py-1 bg-green-100 text-green-800 rounded-full text-xs">
+            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+            SafeCheck System Online
+          </div>
         </div>
       </div>
 

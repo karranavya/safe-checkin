@@ -15,6 +15,9 @@ interface PoliceUser {
   station: string;
   rank: string;
   isActive: boolean;
+  role: "admin_police" | "sub_police"; // ADD THIS LINE
+  lastLoginAt?: string;
+  loginCount?: number;
 }
 
 interface PoliceAuthContextType {

@@ -2,7 +2,7 @@
 const express = require("express");
 const router = express.Router();
 
-// const { authenticatePolice } = require("../middleware/policeAuth");
+const { authenticatePolice } = require("../middleware/policeAuth");
 const {
   registerHotel,
   loginHotel,
@@ -19,7 +19,20 @@ const { auth, rateLimiter } = require("../middleware/auth");
 // Public routes (no authentication required)
 
 router.post("/login", loginHotel);
-router.post("/register", registerHotel); // Add middleware
+router.post(
+  "/register",
+  (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      // If police token is present, authenticate as police
+      authenticatePolice(req, res, next);
+    } else {
+      // Allow public registration
+      next();
+    }
+  },
+  registerHotel
+);
 router.get("/all", getAllHotels);
 // Protected routes (authentication required)
 router.use(auth); // All routes below require authentication

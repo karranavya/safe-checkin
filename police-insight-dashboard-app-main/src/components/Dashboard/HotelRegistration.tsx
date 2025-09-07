@@ -1,5 +1,5 @@
 // src/pages/HotelRegistration.tsx
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Building,
   Mail,
@@ -30,6 +30,22 @@ interface MessageState {
   text: string;
 }
 
+// ✅ Define proper TypeScript interface for police auth
+interface PoliceAuth {
+  token?: string;
+  policeId?: string;
+  officerId?: string;
+  police?: {
+    id: string;
+    name: string;
+    badgeNumber: string;
+    station: string;
+    rank: string;
+  };
+  role?: string;
+  loginTime?: number;
+}
+
 const HotelRegistration: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(false);
   const [message, setMessage] = useState<MessageState>({ type: "", text: "" });
@@ -45,6 +61,33 @@ const HotelRegistration: React.FC = () => {
     roomRate: "",
     address: "",
   });
+
+  // ✅ Add useEffect to debug localStorage on component mount
+  useEffect(() => {
+    console.log("=== LOGIN STATUS DEBUG ===");
+    console.log("localStorage keys:", Object.keys(localStorage));
+    console.log("sessionStorage keys:", Object.keys(sessionStorage));
+
+    // Check all possible storage locations
+    console.log(
+      "police-dashboard-auth (localStorage):",
+      localStorage.getItem("police-dashboard-auth")
+    );
+    console.log(
+      "police-dashboard-auth (sessionStorage):",
+      sessionStorage.getItem("police-dashboard-auth")
+    );
+    console.log(
+      "policeToken (localStorage):",
+      localStorage.getItem("policeToken")
+    );
+    console.log(
+      "policeToken (sessionStorage):",
+      sessionStorage.getItem("policeToken")
+    );
+
+    console.log("=== END DEBUG ===");
+  }, []);
 
   // Handle form changes
   const handleRegisterChange = (
@@ -62,12 +105,74 @@ const HotelRegistration: React.FC = () => {
     return /^[0-9]{10}$/.test(phone.replace(/\D/g, ""));
   };
 
-  // Handle registration submission
+  // ✅ Corrected handle registration with proper authentication
   const handleRegister = async () => {
     setLoading(true);
     setMessage({ type: "", text: "" });
 
-    // Destructure form data - THIS IS THE KEY FIX
+    // Debug all storage options
+    console.log("=== STORAGE DEBUG ===");
+    console.log(
+      "localStorage police-dashboard-auth:",
+      localStorage.getItem("police-dashboard-auth")
+    );
+    console.log(
+      "sessionStorage police-dashboard-auth:",
+      sessionStorage.getItem("police-dashboard-auth")
+    );
+    console.log(
+      "localStorage policeToken:",
+      localStorage.getItem("policeToken")
+    );
+    console.log(
+      "sessionStorage policeToken:",
+      sessionStorage.getItem("policeToken")
+    );
+
+    // Try both storage options
+    let policeAuthRaw =
+      localStorage.getItem("police-dashboard-auth") ||
+      sessionStorage.getItem("police-dashboard-auth");
+
+    let token =
+      localStorage.getItem("policeToken") ||
+      sessionStorage.getItem("policeToken");
+
+    if (!policeAuthRaw && !token) {
+      setMessage({
+        type: "error",
+        text: "Please log in as a police officer first. No authentication data found.",
+      });
+      setLoading(false);
+      return;
+    }
+
+    // ✅ Proper typing with interface
+    let policeAuth: PoliceAuth = {};
+    if (policeAuthRaw) {
+      try {
+        policeAuth = JSON.parse(policeAuthRaw) as PoliceAuth;
+      } catch (error) {
+        console.error("Error parsing auth data:", error);
+      }
+    }
+
+    // Use token from either source
+    const authToken = policeAuth.token || token;
+
+    if (!authToken) {
+      setMessage({
+        type: "error",
+        text: "No authentication token found. Please log in again.",
+      });
+      setLoading(false);
+      return;
+    }
+
+    console.log("Using token:", authToken.substring(0, 20) + "...");
+    console.log("Police data:", policeAuth);
+
+    // Destructure form data
     const {
       name,
       email,
@@ -145,9 +250,9 @@ const HotelRegistration: React.FC = () => {
       // Remove confirmPassword before sending
       const { confirmPassword: _, ...registerData } = registerForm;
 
-      // Get police officer info from localStorage
-      const policeAuth = JSON.parse(
-        localStorage.getItem("police-dashboard-auth") || "{}"
+      console.log(
+        "Making API call with token:",
+        authToken.substring(0, 20) + "..."
       );
 
       const response = await fetch(
@@ -156,19 +261,29 @@ const HotelRegistration: React.FC = () => {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${policeAuth.token}`,
+            Authorization: `Bearer ${authToken}`,
           },
           body: JSON.stringify({
             ...registerData,
             numberOfRooms: parseInt(numberOfRooms),
             roomRate: parseFloat(roomRate),
             registeredByPolice: true,
-            policeOfficerId: policeAuth.officerId,
+            policeOfficerId: policeAuth.policeId || policeAuth.officerId,
+            // Pass additional police info if available
+            policeOfficerInfo: {
+              id: policeAuth.policeId || policeAuth.officerId,
+              name: policeAuth.police?.name,
+              badgeNumber: policeAuth.police?.badgeNumber,
+              station: policeAuth.police?.station,
+              rank: policeAuth.police?.rank,
+            },
           }),
         }
       );
 
+      console.log("Response status:", response.status);
       const data = await response.json();
+      console.log("Response data:", data);
 
       if (response.ok) {
         setMessage({
@@ -190,12 +305,12 @@ const HotelRegistration: React.FC = () => {
       } else {
         setMessage({
           type: "error",
-          text: data.error || "Registration failed",
+          text: data.error || `Registration failed (${response.status})`,
         });
       }
     } catch (error) {
-      setMessage({ type: "error", text: "Network error. Please try again." });
       console.error("Registration error:", error);
+      setMessage({ type: "error", text: "Network error. Please try again." });
     }
 
     setLoading(false);

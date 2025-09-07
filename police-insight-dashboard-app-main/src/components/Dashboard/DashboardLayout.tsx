@@ -1,3 +1,4 @@
+// components/Dashboard/DashboardLayout.tsx - UPDATED with role-based features
 import { useEffect, useState } from "react";
 import { Outlet, useNavigate } from "react-router-dom";
 import { usePoliceAuth } from "@/contexts/PoliceAuthContext";
@@ -5,7 +6,16 @@ import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { AutoRefresh } from "@/components/ui/auto-refresh";
 import { Sidebar } from "./Sidebar";
-import { LogOut, Menu, X, User, Shield, MapPin } from "lucide-react";
+import {
+  LogOut,
+  Menu,
+  X,
+  User,
+  Shield,
+  MapPin,
+  Crown,
+  Settings,
+} from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 export const DashboardLayout = () => {
@@ -14,6 +24,10 @@ export const DashboardLayout = () => {
   const { toast } = useToast();
   const { user, logout, isAuthenticated, isLoading } = usePoliceAuth();
 
+  // 🔍 ADD THESE DEBUG LINES
+  console.log("🔍 DEBUG - Current user:", user);
+  console.log("🔍 DEBUG - User role:", user?.role);
+  console.log("🔍 DEBUG - Is admin?:", user?.role === "admin_police");
   // Police jurisdiction information
   const jurisdiction = {
     district: "Mumbai Central",
@@ -54,6 +68,15 @@ export const DashboardLayout = () => {
     return null;
   }
 
+  // Role-based configurations
+  const isAdmin = user?.role === "admin_police";
+  const headerTitle = isAdmin
+    ? "Admin Command Center"
+    : "Police Command Center";
+  const headerSubtitle = isAdmin
+    ? "System Administration & Oversight"
+    : "Field Operations Dashboard";
+
   return (
     <div className="min-h-screen bg-background flex">
       <AutoRefresh />
@@ -72,7 +95,13 @@ export const DashboardLayout = () => {
       {/* Main Content - adjusted for fixed sidebar */}
       <div className="flex-1 flex flex-col lg:ml-80">
         {/* Header */}
-        <header className="bg-gradient-to-r from-[#1e3a5f] to-[#0ea5e9] shadow-2xl border-b border-blue-800/20">
+        <header
+          className={`shadow-2xl border-b ${
+            isAdmin
+              ? "bg-gradient-to-r from-[#4c1d95] to-[#7c3aed] border-purple-800/20"
+              : "bg-gradient-to-r from-[#1e3a5f] to-[#0ea5e9] border-blue-800/20"
+          }`}
+        >
           <div className="px-6 py-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-4">
@@ -89,12 +118,21 @@ export const DashboardLayout = () => {
                   )}
                 </Button>
                 <div className="flex items-center space-x-3">
-                  <div className="p-2 bg-white/10 rounded-full">
-                    <Shield className="h-6 w-6 text-white" />
+                  <div
+                    className={`p-2 bg-white/10 rounded-full ${
+                      isAdmin ? "bg-purple-200/20" : ""
+                    }`}
+                  >
+                    {isAdmin ? (
+                      <Crown className="h-6 w-6 text-yellow-300" />
+                    ) : (
+                      <Shield className="h-6 w-6 text-white" />
+                    )}
                   </div>
                   <div className="text-white">
-                    <h1 className="text-xl font-bold">Police Command Center</h1>
-                    <div className="flex items-center space-x-2 text-sm text-white/80">
+                    <h1 className="text-xl font-bold">{headerTitle}</h1>
+                    <p className="text-sm text-white/80">{headerSubtitle}</p>
+                    <div className="flex items-center space-x-2 text-sm text-white/70 mt-1">
                       <MapPin className="h-3 w-3" />
                       <span>
                         {jurisdiction.district} • {jurisdiction.zone} •{" "}
@@ -104,7 +142,24 @@ export const DashboardLayout = () => {
                   </div>
                 </div>
               </div>
+
               <div className="flex items-center space-x-4">
+                {/* Admin-specific system indicators */}
+                {isAdmin && (
+                  <div className="hidden md:flex items-center space-x-4 text-white">
+                    <div className="flex items-center space-x-2 bg-white/10 px-3 py-1 rounded-full">
+                      <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                      <span className="text-xs font-medium">
+                        12 Officers Online
+                      </span>
+                    </div>
+                    <div className="flex items-center space-x-2 bg-white/10 px-3 py-1 rounded-full">
+                      <Settings className="h-3 w-3" />
+                      <span className="text-xs font-medium">System: 99.8%</span>
+                    </div>
+                  </div>
+                )}
+
                 {/* User Info */}
                 {user && (
                   <div className="hidden md:flex items-center space-x-3 text-white">
@@ -112,13 +167,26 @@ export const DashboardLayout = () => {
                       <User className="h-4 w-4" />
                     </div>
                     <div className="text-right">
-                      <div className="font-medium">{user.name}</div>
+                      <div className="font-medium flex items-center gap-2">
+                        {user.name}
+                        {/* Role Badge */}
+                        <span
+                          className={`px-2 py-1 rounded text-xs font-semibold ${
+                            isAdmin
+                              ? "bg-yellow-500 text-black"
+                              : "bg-blue-500 text-white"
+                          }`}
+                        >
+                          {isAdmin ? "ADMIN" : "OFFICER"}
+                        </span>
+                      </div>
                       <div className="text-xs text-white/80">
                         {user.rank} • Badge #{user.badgeNumber}
                       </div>
                     </div>
                   </div>
                 )}
+
                 <ThemeToggle />
                 <Button
                   variant="destructive"
@@ -131,7 +199,8 @@ export const DashboardLayout = () => {
                 </Button>
               </div>
             </div>
-            {/* Jurisdiction Info Bar */}
+
+            {/* Enhanced Jurisdiction Info Bar */}
             <div className="mt-4 p-4 bg-white/10 backdrop-blur-sm rounded-lg border border-white/20">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-6 text-white/90">
@@ -164,16 +233,29 @@ export const DashboardLayout = () => {
                   <div className="w-px h-8 bg-white/30"></div>
                   <div className="text-center">
                     <div className="text-xs font-medium text-white/70">
-                      AREA
+                      {isAdmin ? "ACCESS LEVEL" : "AREA"}
                     </div>
                     <div className="text-sm font-semibold">
-                      {jurisdiction.area}
+                      {isAdmin ? "ADMINISTRATOR" : jurisdiction.area}
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center space-x-2 text-white/80">
-                  <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-                  <span className="text-xs font-medium">SYSTEM ONLINE</span>
+
+                <div className="flex items-center space-x-4">
+                  {isAdmin && (
+                    <div className="flex items-center space-x-2 text-yellow-300">
+                      <Crown className="w-4 h-4" />
+                      <span className="text-xs font-medium">
+                        ADMIN PRIVILEGES
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex items-center space-x-2 text-white/80">
+                    <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                    <span className="text-xs font-medium">
+                      {isAdmin ? "SYSTEM OPERATIONAL" : "FIELD READY"}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -182,7 +264,7 @@ export const DashboardLayout = () => {
 
         {/* Main Content Area */}
         <main className="flex-1 p-6 bg-background">
-          <Outlet />
+          <Outlet /> {/* Add this line - renders nested routes */}
         </main>
       </div>
     </div>

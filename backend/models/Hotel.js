@@ -63,11 +63,13 @@ const hotelSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    // CHANGE THIS: From String to ObjectId
     registeredBy: {
-      type: String, // Changed from ObjectId to String
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Police", // Add reference to Police model
       default: null,
     },
-    // If you want to store police officer details, add this
+    // Keep this as embedded document for quick access
     policeOfficer: {
       id: String,
       name: String,

@@ -2,7 +2,7 @@
 const Hotel = require("../models/Hotel");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-
+const mongoose = require("mongoose");
 // Generate JWT token
 const generateToken = (hotelId) => {
   return jwt.sign({ hotelId }, process.env.JWT_SECRET, {
@@ -24,6 +24,7 @@ const registerHotel = async (req, res) => {
       address,
       registeredByPolice,
       policeOfficerId,
+      policeOfficerInfo,
     } = req.body;
 
     // Validate required fields
@@ -63,19 +64,53 @@ const registerHotel = async (req, res) => {
     const salt = await bcrypt.genSalt(12);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // Get police officer info from the middleware (if authenticated)
+    // Enhanced police officer data handling
     let policeOfficerData = null;
-    if (req.police) {
+    let actualPoliceOfficerId = null;
+
+    // Check if request comes from authenticated police officer
+    if (req.user && req.user.policeId) {
+      // If coming from authenticated police middleware
+      actualPoliceOfficerId = req.user.policeId;
       policeOfficerData = {
-        id: req.police.policeId || policeOfficerId,
-        name: req.police.name || "Police Officer",
-        badgeNumber: req.police.badgeNumber || "N/A",
-        station: req.police.station || "N/A",
-        rank: req.police.rank || "Officer",
+        id: req.user.policeId,
+        name: req.user.name || "Police Officer",
+        badgeNumber: req.user.badgeNumber || "N/A",
+        station: req.user.station || "N/A",
+        rank: req.user.rank || "Officer",
       };
+    } else if (policeOfficerInfo && policeOfficerId) {
+      // If police info is passed in request body
+      actualPoliceOfficerId = policeOfficerId;
+      policeOfficerData = {
+        id: policeOfficerId,
+        name: policeOfficerInfo.name || "Police Officer",
+        badgeNumber: policeOfficerInfo.badgeNumber || "N/A",
+        station: policeOfficerInfo.station || "N/A",
+        rank: policeOfficerInfo.rank || "Officer",
+      };
+    } else if (policeOfficerId) {
+      // Fallback: Try to fetch police officer details from database
+      try {
+        const Police = require("../models/Police");
+        const policeOfficer = await Police.findById(policeOfficerId).select(
+          "-password"
+        );
+        if (policeOfficer) {
+          actualPoliceOfficerId = policeOfficerId;
+          policeOfficerData = {
+            id: policeOfficer._id.toString(),
+            name: policeOfficer.name,
+            badgeNumber: policeOfficer.badgeNumber,
+            station: policeOfficer.station,
+            rank: policeOfficer.rank,
+          };
+        }
+      } catch (fetchError) {
+        console.error("Error fetching police officer details:", fetchError);
+      }
     }
 
-    // Create hotel with updated structure
     const hotel = new Hotel({
       name: name.trim(),
       email: email.toLowerCase().trim(),
@@ -86,14 +121,16 @@ const registerHotel = async (req, res) => {
       roomRate: parseFloat(roomRate),
       address: address || {},
       registeredByPolice: registeredByPolice || false,
-      registeredBy:
-        policeOfficerId || (req.police ? req.police.policeId : null),
-      policeOfficer: policeOfficerData, // Store complete police officer info
+      // Store as ObjectId for proper relationship
+      registeredBy: actualPoliceOfficerId
+        ? new mongoose.Types.ObjectId(actualPoliceOfficerId)
+        : null,
+      // Keep embedded document for quick access
+      policeOfficer: policeOfficerData,
     });
 
     await hotel.save();
 
-    // Generate token
     const token = generateToken(hotel._id);
 
     res.status(201).json({
@@ -109,6 +146,7 @@ const registerHotel = async (req, res) => {
         roomRate: hotel.roomRate,
         registrationDate: hotel.registrationDate,
         registeredByPolice: hotel.registeredByPolice,
+        registeredBy: hotel.registeredBy,
         policeOfficer: hotel.policeOfficer,
       },
     });

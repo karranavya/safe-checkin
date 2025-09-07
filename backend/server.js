@@ -11,6 +11,7 @@ const alertRoutes = require("./routes/alertRoutes");
 const reportRoutes = require("./routes/reportRoutes");
 const policeRoutes = require("./routes/policeRoutes");
 const policeAlertRoutes = require("./routes/policeAlertRoutes");
+const activityRoutes = require("./routes/activityRoutes");
 // Load environment variables
 dotenv.config();
 
@@ -64,6 +65,7 @@ app.get("/", (_req, res) => {
       "/api/alerts",
       "/api/reports",
       "/api/police",
+      "/api/activities",
     ],
   });
 });
@@ -75,6 +77,7 @@ app.use("/api/alerts", alertRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/police", policeRoutes);
 app.use("/api/police/alerts", policeAlertRoutes);
+app.use("/api/activities", activityRoutes);
 
 /* ───────────────────────  404 HANDLER - JSON ONLY  ───────────────────────────── */
 app.use((req, res) => {

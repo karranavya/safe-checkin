@@ -338,6 +338,32 @@ export default function ReportsPage() {
     setGuestModal({ open: false, hotel: null });
     setHotelGuests([]);
   };
+  // Add this at the top of your HotelRegistration component
+  useEffect(() => {
+    console.log("=== LOGIN STATUS DEBUG ===");
+    console.log("localStorage keys:", Object.keys(localStorage));
+    console.log("sessionStorage keys:", Object.keys(sessionStorage));
+
+    // Check all possible storage locations
+    console.log(
+      "police-dashboard-auth (localStorage):",
+      localStorage.getItem("police-dashboard-auth")
+    );
+    console.log(
+      "police-dashboard-auth (sessionStorage):",
+      sessionStorage.getItem("police-dashboard-auth")
+    );
+    console.log(
+      "policeToken (localStorage):",
+      localStorage.getItem("policeToken")
+    );
+    console.log(
+      "policeToken (sessionStorage):",
+      sessionStorage.getItem("policeToken")
+    );
+
+    console.log("=== END DEBUG ===");
+  }, []);
 
   // Calculate totals based on report type
   const totalCheckins =

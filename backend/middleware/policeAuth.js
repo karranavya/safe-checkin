@@ -1,5 +1,6 @@
-// middleware/policeAuth.js (Fixed)
+// middleware/policeAuth.js - UPDATED with role-based access and activity logging
 const jwt = require("jsonwebtoken");
+const { logActivity } = require("../controllers/activityController");
 
 const authenticatePolice = (req, res, next) => {
   try {
@@ -40,7 +41,7 @@ const authenticatePolice = (req, res, next) => {
         });
       }
 
-      // Add user info to request
+      // Add user info to request (INCLUDING ROLE)
       req.user = decoded;
       next();
     } catch (jwtError) {
@@ -78,4 +79,86 @@ const authenticatePolice = (req, res, next) => {
   }
 };
 
-module.exports = { authenticatePolice };
+// Role-based middleware functions
+const requireAdminPolice = (req, res, next) => {
+  if (req.user.policeRole !== "admin_police") {
+    return res.status(403).json({
+      success: false,
+      error: "Access denied. Admin police role required.",
+      code: "ADMIN_ACCESS_REQUIRED",
+    });
+  }
+  next();
+};
+
+const requireSubPolice = (req, res, next) => {
+  if (req.user.policeRole !== "sub_police") {
+    return res.status(403).json({
+      success: false,
+      error: "Access denied. Sub police role required.",
+      code: "SUB_POLICE_ACCESS_REQUIRED",
+    });
+  }
+  next();
+};
+
+const requireAnyPolice = (req, res, next) => {
+  if (!["admin_police", "sub_police"].includes(req.user.policeRole)) {
+    return res.status(403).json({
+      success: false,
+      error: "Access denied. Police role required.",
+      code: "POLICE_ACCESS_REQUIRED",
+    });
+  }
+  next();
+};
+
+// Activity logging middleware for sub-police actions
+const logSubPoliceActivity = (action, targetType) => {
+  return async (req, res, next) => {
+    // Store original res.json to intercept successful responses
+    const originalJson = res.json;
+
+    res.json = function (data) {
+      // Only log if the operation was successful and user is sub-police
+      if (data.success && req.user && req.user.policeRole === "sub_police") {
+        // Extract target ID from request or response
+        const targetId =
+          req.params.id ||
+          req.params.hotelId ||
+          req.params.suspectId ||
+          req.params.alertId ||
+          (data.data && data.data.id) ||
+          new Date();
+
+        // Log the activity asynchronously (don't wait for it)
+        logActivity(
+          req.user.policeId,
+          action,
+          targetType,
+          targetId,
+          {
+            method: req.method,
+            path: req.path,
+            body: req.body,
+            timestamp: new Date(),
+          },
+          req
+        ).catch((err) => console.error("Activity logging failed:", err));
+      }
+
+      // Call original res.json
+      return originalJson.call(this, data);
+    };
+
+    next();
+  };
+};
+
+module.exports = {
+  authenticatePolice,
+  requireAdminPolice,
+  requireSubPolice,
+  requireAnyPolice,
+  logSubPoliceActivity,
+};

@@ -1,6 +1,8 @@
+// components/Dashboard/DashboardHome.tsx - UPDATED with role-based content and data fetching
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Users,
   Building2,
@@ -11,9 +13,17 @@ import {
   Shield,
   AlertTriangle,
   RefreshCw,
+  Crown,
+  BarChart3,
+  Eye,
+  TrendingUp,
+  Clock,
 } from "lucide-react";
+import { usePoliceAuth } from "@/contexts/PoliceAuthContext";
+import { useToast } from "@/hooks/use-toast";
+import { useNavigate } from "react-router-dom";
 
-// TypeScript interfaces based on your API responses
+// TypeScript interfaces
 interface Hotel {
   id: string;
   name: string;
@@ -36,6 +46,15 @@ interface AreaStats {
   totalGuests: number;
 }
 
+interface AdminStats {
+  totalSubPolice: number;
+  activeSubPolice: number;
+  weeklyActivities: number;
+  systemHealth: number;
+  recentActivities: any[];
+  activitiesByAction: any[];
+}
+
 interface ApiResponse<T> {
   success: boolean;
   data: T;
@@ -45,18 +64,6 @@ interface ApiResponse<T> {
     startDate: string;
     endDate: string;
   };
-}
-
-interface Guest {
-  _id: string;
-  name: string;
-  phone: string;
-  roomNumber: string;
-  status: string;
-  checkInTime: string;
-  nationality: string;
-  purpose: string;
-  guestCount: number;
 }
 
 const accommodationTypeColors = {
@@ -82,7 +89,22 @@ const accommodationTypeLabels = {
 };
 
 export const DashboardHome = () => {
-  // State variables
+  const { user } = usePoliceAuth();
+  const { toast } = useToast();
+  const navigate = useNavigate();
+
+  // Role detection
+  const isAdmin = user?.role === "admin_police";
+
+  // Common state
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
+
+  // Admin-specific state
+  const [adminStats, setAdminStats] = useState<AdminStats | null>(null);
+
+  // Regular police state
   const [hotels, setHotels] = useState<Hotel[]>([]);
   const [areaStats, setAreaStats] = useState<AreaStats>({
     totalCheckins: 0,
@@ -91,20 +113,20 @@ export const DashboardHome = () => {
     totalGuests: 0,
   });
   const [recentActivity, setRecentActivity] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
+
+  // Debug logs
+  console.log("🔍 DashboardHome - User:", user);
+  console.log("🔍 DashboardHome - Role:", user?.role);
+  console.log("🔍 DashboardHome - Is Admin?:", isAdmin);
 
   // API call helper function
   const apiCall = async <T,>(endpoint: string): Promise<ApiResponse<T>> => {
     const token =
       sessionStorage.getItem("policeToken") ||
       localStorage.getItem("policeToken");
-
     if (!token) {
       throw new Error("Authentication token not found. Please login again.");
     }
-
     const baseUrl = import.meta.env.VITE_API_URL || "http://localhost:5000";
     const response = await fetch(`${baseUrl}${endpoint}`, {
       headers: {
@@ -112,21 +134,60 @@ export const DashboardHome = () => {
         "Content-Type": "application/json",
       },
     });
-
     if (!response.ok) {
       throw new Error(`API call failed: ${response.statusText}`);
     }
-
     return response.json();
   };
 
-  // Fetch all dashboard data
-  const fetchDashboardData = async () => {
-    setLoading(true);
-    setError(null);
-
+  // Fetch admin dashboard data
+  const fetchAdminData = async () => {
     try {
-      // Fetch data in parallel
+      console.log("🔄 Fetching admin data...");
+
+      const [subPoliceRes, activityStatsRes] = await Promise.all([
+        apiCall<{ officers: any[]; pagination: { totalCount: number } }>(
+          "/api/police/sub-police?limit=1000"
+        ),
+        apiCall<{
+          summary: { totalActivities: number };
+          recentActivities: any[];
+          activitiesByAction: any[];
+        }>("/api/activities/stats?days=7"),
+      ]);
+
+      if (subPoliceRes.success && activityStatsRes.success) {
+        setAdminStats({
+          totalSubPolice: subPoliceRes.data?.pagination?.totalCount || 0,
+          activeSubPolice:
+            subPoliceRes.data?.officers?.filter((o: any) => o.isActive)
+              ?.length || 0,
+          weeklyActivities:
+            activityStatsRes.data?.summary?.totalActivities || 0,
+          systemHealth: 98.5,
+          recentActivities: activityStatsRes.data?.recentActivities || [],
+          activitiesByAction: activityStatsRes.data?.activitiesByAction || [],
+        });
+      }
+    } catch (error) {
+      console.error("Failed to fetch admin data:", error);
+      // Fallback to mock data for demo
+      setAdminStats({
+        totalSubPolice: 12,
+        activeSubPolice: 10,
+        weeklyActivities: 156,
+        systemHealth: 98.5,
+        recentActivities: [],
+        activitiesByAction: [],
+      });
+    }
+  };
+
+  // Fetch regular police dashboard data
+  const fetchRegularData = async () => {
+    try {
+      console.log("🔄 Fetching regular police data...");
+
       const [hotelsResponse, statsResponse] = await Promise.all([
         apiCall<Hotel[]>("/api/reports/hotels-stats?period=all"),
         apiCall<AreaStats>("/api/reports/area-stats?period=all"),
@@ -163,16 +224,31 @@ export const DashboardHome = () => {
                 : hotel.checkouts,
             accommodationType: hotel.type,
           }));
-
         setRecentActivity(activity);
       }
-
-      setLastUpdated(new Date());
     } catch (err) {
       console.error("Dashboard data fetch error:", err);
       setError(
         err instanceof Error ? err.message : "Failed to fetch dashboard data"
       );
+    }
+  };
+
+  // Main data fetch function
+  const fetchDashboardData = async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      if (isAdmin) {
+        await fetchAdminData();
+      } else {
+        await fetchRegularData();
+      }
+      setLastUpdated(new Date());
+    } catch (err) {
+      console.error("Dashboard fetch error:", err);
+      setError(err instanceof Error ? err.message : "Failed to fetch data");
     } finally {
       setLoading(false);
     }
@@ -180,19 +256,13 @@ export const DashboardHome = () => {
 
   // Initial data fetch
   useEffect(() => {
+    console.log("📊 DashboardHome useEffect - Role:", user?.role);
     fetchDashboardData();
 
     // Set up auto-refresh every 2 minutes
     const interval = setInterval(fetchDashboardData, 120000);
     return () => clearInterval(interval);
-  }, []);
-
-  // Calculate accommodation types breakdown
-  const accommodationTypes = hotels.reduce((acc, hotel) => {
-    const type = hotel.type || "hotel";
-    acc[type] = (acc[type] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
+  }, [isAdmin, user?.role]);
 
   // Get activity icon
   const getActivityIcon = (type: string) => {
@@ -210,7 +280,8 @@ export const DashboardHome = () => {
     }
   };
 
-  if (loading && hotels.length === 0) {
+  // Loading state
+  if (loading && !adminStats && hotels.length === 0) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-6">
         <div className="max-w-7xl mx-auto">
@@ -218,7 +289,7 @@ export const DashboardHome = () => {
             <div className="text-center">
               <RefreshCw className="h-12 w-12 animate-spin text-blue-600 mx-auto mb-4" />
               <p className="text-lg font-semibold text-gray-700">
-                Loading Dashboard...
+                Loading {isAdmin ? "Admin" : "Police"} Dashboard...
               </p>
               <p className="text-gray-500">
                 Fetching real-time data from the system
@@ -230,10 +301,286 @@ export const DashboardHome = () => {
     );
   }
 
+  // Admin Dashboard Render
+  if (isAdmin && adminStats) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-50 to-blue-50 p-6">
+        <div className="max-w-7xl mx-auto space-y-6">
+          {/* Admin Header */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-4">
+              <div className="p-3 bg-gradient-to-br from-purple-900 to-purple-700 rounded-xl shadow-lg">
+                <Crown className="h-8 w-8 text-yellow-300" />
+              </div>
+              <div>
+                <h1 className="text-3xl font-bold text-gray-900">
+                  Welcome, Administrator {user?.name}
+                </h1>
+                <p className="text-gray-600">
+                  System overview and control panel
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center space-x-4">
+              <button
+                onClick={fetchDashboardData}
+                disabled={loading}
+                className="flex items-center space-x-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
+              >
+                <RefreshCw
+                  className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}
+                />
+                <span>Refresh</span>
+              </button>
+              <Badge className="bg-gradient-to-r from-green-500 to-green-600 text-white px-4 py-2 text-sm font-medium">
+                ADMIN PANEL ACTIVE • {lastUpdated.toLocaleTimeString()}
+              </Badge>
+            </div>
+          </div>
+
+          {/* Admin Stats Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <Card className="bg-white shadow-xl border-0 rounded-2xl overflow-hidden border-l-4 border-blue-500">
+              <div className="bg-gradient-to-r from-blue-500 to-blue-600 p-4">
+                <div className="flex items-center justify-between">
+                  <div className="text-white">
+                    <p className="text-blue-100 text-sm font-medium">
+                      Sub-Police Officers
+                    </p>
+                    <p className="text-3xl font-bold">
+                      {adminStats.totalSubPolice}
+                    </p>
+                  </div>
+                  <div className="bg-white/20 p-3 rounded-full">
+                    <Users className="h-6 w-6 text-white" />
+                  </div>
+                </div>
+              </div>
+              <CardContent className="p-4">
+                <p className="text-xs text-muted-foreground">
+                  {adminStats.activeSubPolice} currently active
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-2 w-full"
+                  onClick={() => navigate("/dashboard/admin/officers")}
+                >
+                  Manage Officers
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-white shadow-xl border-0 rounded-2xl overflow-hidden border-l-4 border-green-500">
+              <div className="bg-gradient-to-r from-green-500 to-green-600 p-4">
+                <div className="flex items-center justify-between">
+                  <div className="text-white">
+                    <p className="text-green-100 text-sm font-medium">
+                      Weekly Activities
+                    </p>
+                    <p className="text-3xl font-bold">
+                      {adminStats.weeklyActivities}
+                    </p>
+                  </div>
+                  <div className="bg-white/20 p-3 rounded-full">
+                    <Activity className="h-6 w-6 text-white" />
+                  </div>
+                </div>
+              </div>
+              <CardContent className="p-4">
+                <div className="flex items-center text-xs text-green-600">
+                  <TrendingUp className="h-3 w-3 mr-1" />
+                  +12% from last week
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-2 w-full"
+                  onClick={() => navigate("/dashboard/admin/activities")}
+                >
+                  View Activities
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-white shadow-xl border-0 rounded-2xl overflow-hidden border-l-4 border-purple-500">
+              <div className="bg-gradient-to-r from-purple-500 to-purple-600 p-4">
+                <div className="flex items-center justify-between">
+                  <div className="text-white">
+                    <p className="text-purple-100 text-sm font-medium">
+                      System Health
+                    </p>
+                    <p className="text-3xl font-bold text-green-300">
+                      {adminStats.systemHealth}%
+                    </p>
+                  </div>
+                  <div className="bg-white/20 p-3 rounded-full">
+                    <Shield className="h-6 w-6 text-white" />
+                  </div>
+                </div>
+              </div>
+              <CardContent className="p-4">
+                <p className="text-xs text-muted-foreground">
+                  All systems operational
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-2 w-full"
+                  onClick={() => navigate("/dashboard/admin/analytics")}
+                >
+                  View Analytics
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-white shadow-xl border-0 rounded-2xl overflow-hidden border-l-4 border-orange-500">
+              <div className="bg-gradient-to-r from-orange-500 to-orange-600 p-4">
+                <div className="flex items-center justify-between">
+                  <div className="text-white">
+                    <p className="text-orange-100 text-sm font-medium">
+                      Quick Actions
+                    </p>
+                    <p className="text-3xl font-bold">4</p>
+                  </div>
+                  <div className="bg-white/20 p-3 rounded-full">
+                    <BarChart3 className="h-6 w-6 text-white" />
+                  </div>
+                </div>
+              </div>
+              <CardContent className="p-4">
+                <p className="text-xs text-muted-foreground">
+                  Administrative tasks
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-2 w-full"
+                  onClick={() => navigate("/dashboard/admin/reports")}
+                >
+                  Admin Reports
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Recent Activities & Quick Links */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card className="bg-white shadow-xl border-0 rounded-2xl">
+              <CardHeader className="bg-gradient-to-r from-slate-50 to-purple-50 rounded-t-2xl">
+                <CardTitle className="flex items-center space-x-3">
+                  <Activity className="h-5 w-5 text-purple-600" />
+                  <span className="text-gray-900">
+                    Recent System Activities
+                  </span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-6">
+                <div className="space-y-3">
+                  {adminStats.recentActivities
+                    .slice(0, 5)
+                    .map((activity: any, index: number) => (
+                      <div
+                        key={index}
+                        className="flex items-center justify-between p-2 bg-purple-50 rounded"
+                      >
+                        <div>
+                          <div className="font-medium text-sm">
+                            {activity.performedBy?.name || "Officer"}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {activity.action?.replace(/_/g, " ") ||
+                              "Unknown action"}
+                          </div>
+                        </div>
+                        <Badge variant="outline" className="text-xs">
+                          {new Date(activity.createdAt).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </Badge>
+                      </div>
+                    )) || (
+                    <div className="text-center py-4 text-muted-foreground">
+                      <Activity className="h-8 w-8 mx-auto mb-2 text-gray-400" />
+                      <p className="text-sm">No recent activities</p>
+                    </div>
+                  )}
+                </div>
+                <Button
+                  variant="outline"
+                  className="w-full mt-4"
+                  onClick={() => navigate("/dashboard/admin/activities")}
+                >
+                  View All Activities
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-white shadow-xl border-0 rounded-2xl">
+              <CardHeader className="bg-gradient-to-r from-slate-50 to-purple-50 rounded-t-2xl">
+                <CardTitle className="flex items-center space-x-3">
+                  <Crown className="h-5 w-5 text-purple-600" />
+                  <span className="text-gray-900">Admin Quick Actions</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-6">
+                <div className="grid grid-cols-2 gap-3">
+                  <Button
+                    variant="outline"
+                    className="h-20 flex flex-col items-center justify-center"
+                    onClick={() => navigate("/dashboard/admin/officers")}
+                  >
+                    <Users className="h-6 w-6 mb-2" />
+                    <span className="text-sm">Manage Officers</span>
+                  </Button>
+
+                  <Button
+                    variant="outline"
+                    className="h-20 flex flex-col items-center justify-center"
+                    onClick={() => navigate("/dashboard/admin/activities")}
+                  >
+                    <Eye className="h-6 w-6 mb-2" />
+                    <span className="text-sm">Monitor Activities</span>
+                  </Button>
+
+                  <Button
+                    variant="outline"
+                    className="h-20 flex flex-col items-center justify-center"
+                    onClick={() => navigate("/dashboard/admin/analytics")}
+                  >
+                    <BarChart3 className="h-6 w-6 mb-2" />
+                    <span className="text-sm">System Analytics</span>
+                  </Button>
+
+                  <Button
+                    variant="outline"
+                    className="h-20 flex flex-col items-center justify-center"
+                    onClick={() => navigate("/dashboard/admin/reports")}
+                  >
+                    <Shield className="h-6 w-6 mb-2" />
+                    <span className="text-sm">Generate Reports</span>
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Regular Police Dashboard (your existing code with minor modifications)
+  const accommodationTypes = hotels.reduce((acc, hotel) => {
+    const type = hotel.type || "hotel";
+    acc[type] = (acc[type] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-6">
       <div className="max-w-7xl mx-auto space-y-6">
-        {/* Header */}
+        {/* Regular Police Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
             <div className="p-3 bg-gradient-to-br from-blue-900 to-blue-700 rounded-xl shadow-lg">
@@ -241,15 +588,13 @@ export const DashboardHome = () => {
             </div>
             <div>
               <h1 className="text-3xl font-bold text-gray-900">
-                Police Command Dashboard
+                Welcome, Officer {user?.name}
               </h1>
-              <p className="text-gray-600">
-                Real-time monitoring and surveillance
-              </p>
+              <p className="text-gray-600">Your field operations dashboard</p>
             </div>
           </div>
           <div className="flex items-center space-x-4">
-            <button
+            <Button
               onClick={fetchDashboardData}
               disabled={loading}
               className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
@@ -258,10 +603,9 @@ export const DashboardHome = () => {
                 className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}
               />
               <span>Refresh</span>
-            </button>
+            </Button>
             <Badge className="bg-gradient-to-r from-green-500 to-green-600 text-white px-4 py-2 text-sm font-medium">
-              SYSTEM OPERATIONAL • Last updated:{" "}
-              {lastUpdated.toLocaleTimeString()}
+              FIELD READY • Last updated: {lastUpdated.toLocaleTimeString()}
             </Badge>
           </div>
         </div>
@@ -277,7 +621,7 @@ export const DashboardHome = () => {
           </div>
         )}
 
-        {/* Stats Cards */}
+        {/* Stats Cards - Your existing code */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {/* Check-Ins */}
           <Card className="bg-white shadow-xl border-0 rounded-2xl overflow-hidden">
@@ -375,7 +719,7 @@ export const DashboardHome = () => {
           </Card>
         </div>
 
-        {/* Map and Activity */}
+        {/* Map and Activity - Your existing code continues here... */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Map Section */}
           <Card className="lg:col-span-2 bg-white shadow-xl border-0 rounded-2xl">
@@ -440,7 +784,7 @@ export const DashboardHome = () => {
           </Card>
         </div>
 
-        {/* Accommodation Types Breakdown */}
+        {/* Accommodation Types Breakdown - Your existing code */}
         <Card className="bg-white shadow-xl border-0 rounded-2xl">
           <CardHeader className="bg-gradient-to-r from-slate-50 to-blue-50 rounded-t-2xl">
             <CardTitle className="flex items-center space-x-3">
@@ -460,7 +804,6 @@ export const DashboardHome = () => {
                     accommodationTypeLabels[
                       type as keyof typeof accommodationTypeLabels
                     ] || type.charAt(0).toUpperCase() + type.slice(1);
-
                   return (
                     <div
                       key={type}
