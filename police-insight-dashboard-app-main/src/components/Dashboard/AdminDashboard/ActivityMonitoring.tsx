@@ -38,7 +38,7 @@ interface ActivityLog {
     name: string;
     badgeNumber: string;
     rank: string;
-  } | null;
+  };
   action: string;
   targetType: string;
   targetId: string;
