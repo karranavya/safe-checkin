@@ -26,7 +26,19 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { AlertTriangle, Eye, Clock, Shield } from "lucide-react";
+import {
+  AlertTriangle,
+  Eye,
+  Clock,
+  Shield,
+  User,
+  Phone,
+  MapPin,
+  Calendar,
+  Users,
+  Search,
+  Loader2,
+} from "lucide-react";
 import axios from "axios";
 import { Guest } from "@/components/dashboard/GuestTable";
 import { fetchGuests } from "@/api/guestApi";
@@ -59,13 +71,11 @@ alertsApi.interceptors.response.use(
   (response) => response,
   (error) => {
     console.error("Alert API Error:", error.response?.data || error.message);
-
     if (error.response?.status === 401) {
       localStorage.removeItem("hotelToken");
       localStorage.removeItem("hotelData");
       window.location.href = "/login";
     }
-
     return Promise.reject(error);
   }
 );
@@ -115,7 +125,6 @@ const AlertPolicePage = () => {
       });
 
       // Since we want all guests regardless of status, we might need to make multiple calls
-      // or modify the backend to accept a parameter to return all statuses
       const [checkedInGuests, checkedOutGuests] = await Promise.all([
         fetchGuests({
           roomNumber: roomNumber.trim(),
@@ -192,7 +201,6 @@ const AlertPolicePage = () => {
     }
 
     setSubmitting(true);
-
     try {
       const alertPayload = {
         guestId: selectedGuest._id,
@@ -234,8 +242,8 @@ const AlertPolicePage = () => {
       }
     } catch (error) {
       console.error("Error creating alert:", error);
-
       let errorMessage = "Failed to create alert. Please try again.";
+
       if (axios.isAxiosError(error)) {
         if (error.response?.status === 404) {
           errorMessage = "Guest not found or doesn't belong to your hotel.";
@@ -257,16 +265,32 @@ const AlertPolicePage = () => {
     }
   };
 
-  const statusLabel = (status: string) => {
+  const getStatusConfig = (status: string) => {
     switch (status) {
       case "checked-in":
-        return "🟢 Checked In";
+        return {
+          label: "Checked In",
+          color: "bg-green-100 text-green-800 border-green-200",
+          icon: "🟢",
+        };
       case "checked-out":
-        return "⚪ Checked Out";
+        return {
+          label: "Checked Out",
+          color: "bg-gray-100 text-gray-800 border-gray-200",
+          icon: "⚪",
+        };
       case "reported":
-        return "🔴 Reported";
+        return {
+          label: "Reported",
+          color: "bg-red-100 text-red-800 border-red-200",
+          icon: "🔴",
+        };
       default:
-        return "Unknown";
+        return {
+          label: "Unknown",
+          color: "bg-gray-100 text-gray-600 border-gray-200",
+          icon: "❓",
+        };
     }
   };
 
@@ -301,106 +325,236 @@ const AlertPolicePage = () => {
   };
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-3xl font-bold">Alert to Police</h1>
-      <Card className="max-w-2xl mx-auto">
-        <CardHeader>
-          <CardTitle>Report Suspicious Activity</CardTitle>
-          <CardDescription>
-            Enter a room number to view all guest history and create a police
-            alert if necessary. This will create an official alert in the
-            system.
-          </CardDescription>
-        </CardHeader>
+    <div className="min-h-screen bg-gray-50 p-4 lg:p-8">
+      <div className="max-w-6xl mx-auto space-y-6">
+        {/* Header */}
+        <div className="text-center lg:text-left">
+          <h1 className="text-2xl lg:text-3xl font-bold text-gray-900 flex items-center justify-center lg:justify-start gap-2">
+            <AlertTriangle className="h-6 w-6 lg:h-8 lg:w-8 text-red-600" />
+            Alert to Police
+          </h1>
+          <p className="text-gray-600 mt-2">
+            Report suspicious activities and create official police alerts
+          </p>
+        </div>
 
-        <CardContent className="space-y-4">
-          <div className="flex items-end gap-2">
-            <div className="flex-grow space-y-2">
-              <Label htmlFor="roomNumberAlert">Room Number</Label>
-              <Input
-                id="roomNumberAlert"
-                placeholder="e.g., 101"
-                value={roomNumber}
-                onChange={(e) => setRoomNumber(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleFindGuests()}
-              />
+        {/* Search Card */}
+        <Card className="w-full shadow-lg">
+          <CardHeader className="pb-4">
+            <CardTitle className="text-xl flex items-center gap-2">
+              <Search className="h-5 w-5" />
+              Report Suspicious Activity
+            </CardTitle>
+            <CardDescription className="text-sm lg:text-base">
+              Enter a room number to view all guest history and create a police
+              alert if necessary. This will create an official alert in the
+              system that can be tracked.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-col sm:flex-row items-end gap-3">
+              <div className="w-full sm:flex-grow space-y-2">
+                <Label
+                  htmlFor="roomNumberAlert"
+                  className="text-sm font-medium"
+                >
+                  Room Number
+                </Label>
+                <Input
+                  id="roomNumberAlert"
+                  placeholder="e.g., 101, 205, 312"
+                  value={roomNumber}
+                  onChange={(e) => setRoomNumber(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleFindGuests()}
+                  className="text-base"
+                  disabled={loading}
+                />
+              </div>
+              <Button
+                onClick={handleFindGuests}
+                disabled={loading || !roomNumber.trim()}
+                className="w-full sm:w-auto px-6"
+                size="default"
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Searching...
+                  </>
+                ) : (
+                  <>
+                    <Search className="h-4 w-4 mr-2" />
+                    Find Guests
+                  </>
+                )}
+              </Button>
             </div>
-            <Button onClick={handleFindGuests} disabled={loading}>
-              {loading ? "Searching..." : "Find Guests"}
-            </Button>
-          </div>
+          </CardContent>
+        </Card>
 
-          {searchAttempted && (
-            <div className="pt-4 space-y-4">
-              {guests.length > 0 ? (
-                guests.map((guest, index) => (
-                  <div
-                    key={guest._id || index}
-                    className="border rounded-lg p-4 flex items-center justify-between gap-4 bg-muted/50"
-                  >
-                    <div className="flex-grow">
-                      <p className="font-bold">{guest.name || "N/A"}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {guest.nationality || "Unknown"}, Phone:{" "}
-                        {guest.phone || "N/A"}
-                      </p>
-                      <p className="text-sm text-muted-foreground">
-                        Purpose:{" "}
-                        {guest.purposeOfVisit || guest.purpose || "N/A"},
-                        Guests: {guest.totalGuests || guest.guestCount || 0}
-                      </p>
-                      <p className="text-sm text-muted-foreground">
-                        Check-in:{" "}
-                        {guest.checkInTime || guest.checkInDate || "N/A"}
-                      </p>
-                      {guest.checkOutDate && (
-                        <p className="text-sm text-muted-foreground">
-                          Check-out: {guest.checkOutDate}
-                        </p>
-                      )}
-                      <p className="text-sm font-medium mt-1">
-                        {statusLabel(guest.status)}
-                      </p>
-                    </div>
+        {/* Results Section */}
+        {searchAttempted && (
+          <div className="space-y-4">
+            {guests.length > 0 ? (
+              <>
+                <div className="flex items-center justify-between">
+                  <h2 className="text-lg font-semibold text-gray-900">
+                    Guest Records for Room {roomNumber}
+                  </h2>
+                  <span className="text-sm text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
+                    {guests.length} record(s) found
+                  </span>
+                </div>
 
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      disabled={guest.status === "reported"}
-                      onClick={() => handleOpenAlertDialog(guest)}
-                    >
-                      <AlertTriangle className="h-4 w-4 mr-2" />
-                      {guest.status === "reported"
-                        ? "Reported"
-                        : "Create Alert"}
-                    </Button>
+                <div className="grid gap-4">
+                  {guests.map((guest, index) => {
+                    const statusConfig = getStatusConfig(guest.status);
+                    return (
+                      <Card
+                        key={guest._id || index}
+                        className="shadow-md hover:shadow-lg transition-shadow"
+                      >
+                        <CardContent className="p-4 lg:p-6">
+                          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                            {/* Guest Information */}
+                            <div className="flex-grow space-y-3">
+                              {/* Name and Status */}
+                              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                  <User className="h-5 w-5 text-gray-600" />
+                                  <h3 className="text-lg font-semibold text-gray-900">
+                                    {guest.name || "N/A"}
+                                  </h3>
+                                </div>
+                                <span
+                                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium border ${statusConfig.color}`}
+                                >
+                                  <span>{statusConfig.icon}</span>
+                                  {statusConfig.label}
+                                </span>
+                              </div>
+
+                              {/* Contact Info */}
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                                <div className="flex items-center gap-2 text-gray-600">
+                                  <Phone className="h-4 w-4" />
+                                  <span>{guest.phone || "N/A"}</span>
+                                </div>
+                                <div className="flex items-center gap-2 text-gray-600">
+                                  <MapPin className="h-4 w-4" />
+                                  <span>{guest.nationality || "Unknown"}</span>
+                                </div>
+                              </div>
+
+                              {/* Visit Details */}
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                                <div className="flex items-center gap-2 text-gray-600">
+                                  <Users className="h-4 w-4" />
+                                  <span>
+                                    Purpose:{" "}
+                                    {guest.purposeOfVisit ||
+                                      guest.purpose ||
+                                      "N/A"}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-2 text-gray-600">
+                                  <Users className="h-4 w-4" />
+                                  <span>
+                                    Guests:{" "}
+                                    {guest.totalGuests || guest.guestCount || 0}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Dates */}
+                              <div className="space-y-1 text-sm">
+                                <div className="flex items-center gap-2 text-gray-600">
+                                  <Calendar className="h-4 w-4" />
+                                  <span>
+                                    Check-in:{" "}
+                                    {guest.checkInTime ||
+                                      guest.checkInDate ||
+                                      "N/A"}
+                                  </span>
+                                </div>
+                                {guest.checkOutDate && (
+                                  <div className="flex items-center gap-2 text-gray-600 ml-6">
+                                    <span>Check-out: {guest.checkOutDate}</span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Alert Button */}
+                            <div className="flex-shrink-0 w-full lg:w-auto">
+                              <Button
+                                variant={
+                                  guest.status === "reported"
+                                    ? "secondary"
+                                    : "destructive"
+                                }
+                                size="default"
+                                disabled={
+                                  guest.status === "reported" || loading
+                                }
+                                onClick={() => handleOpenAlertDialog(guest)}
+                                className="w-full lg:w-auto min-w-[140px] font-medium"
+                              >
+                                <AlertTriangle className="h-4 w-4 mr-2" />
+                                {guest.status === "reported"
+                                  ? "Already Reported"
+                                  : "Create Alert"}
+                              </Button>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+              </>
+            ) : (
+              <Card className="shadow-md">
+                <CardContent className="p-8 text-center">
+                  <div className="flex flex-col items-center gap-3">
+                    <Search className="h-12 w-12 text-gray-400" />
+                    <h3 className="text-lg font-medium text-gray-900">
+                      No guests found
+                    </h3>
+                    <p className="text-gray-600">
+                      No guest records found for room {roomNumber}. Please check
+                      the room number and try again.
+                    </p>
                   </div>
-                ))
-              ) : (
-                <p className="text-center text-muted-foreground">
-                  No guests found for this room.
-                </p>
-              )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Alert Creation Dialog */}
       <Dialog open={alertDialogOpen} onOpenChange={setAlertDialogOpen}>
-        <DialogContent className="sm:max-w-[525px]">
+        <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Create Police Alert</DialogTitle>
-            <DialogDescription>
-              Creating an official police alert for {selectedGuest?.name} in
-              room {roomNumber}. This will be recorded in the system and can be
-              tracked.
+            <DialogTitle className="flex items-center gap-2 text-xl">
+              <AlertTriangle className="h-6 w-6 text-red-600" />
+              Create Police Alert
+            </DialogTitle>
+            <DialogDescription className="text-base">
+              Creating an official police alert for{" "}
+              <span className="font-semibold">{selectedGuest?.name}</span> in
+              room <span className="font-semibold">{roomNumber}</span>. This
+              will be recorded in the system and can be tracked.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid gap-4 py-4">
+          <div className="grid gap-6 py-4">
+            {/* Alert Title */}
             <div className="space-y-2">
-              <Label htmlFor="alert-title">Alert Title *</Label>
+              <Label htmlFor="alert-title" className="text-sm font-medium">
+                Alert Title *
+              </Label>
               <Input
                 id="alert-title"
                 value={alertData.title}
@@ -408,11 +562,15 @@ const AlertPolicePage = () => {
                   setAlertData({ ...alertData, title: e.target.value })
                 }
                 placeholder="Brief title describing the issue"
+                className="text-base"
               />
             </div>
 
+            {/* Priority Level */}
             <div className="space-y-2">
-              <Label htmlFor="alert-priority">Priority Level</Label>
+              <Label htmlFor="alert-priority" className="text-sm font-medium">
+                Priority Level
+              </Label>
               <Select
                 value={alertData.priority}
                 onValueChange={(
@@ -451,8 +609,14 @@ const AlertPolicePage = () => {
               </Select>
             </div>
 
+            {/* Description */}
             <div className="space-y-2">
-              <Label htmlFor="alert-description">Detailed Description *</Label>
+              <Label
+                htmlFor="alert-description"
+                className="text-sm font-medium"
+              >
+                Detailed Description *
+              </Label>
               <Textarea
                 id="alert-description"
                 value={alertData.description}
@@ -460,45 +624,52 @@ const AlertPolicePage = () => {
                   setAlertData({ ...alertData, description: e.target.value })
                 }
                 placeholder="Provide detailed information about the suspicious activity, including time, behavior observed, and any other relevant details..."
-                className="min-h-[120px]"
+                className="min-h-[120px] text-base resize-none"
               />
             </div>
 
+            {/* Guest Information Summary */}
             {selectedGuest && (
               <div
-                className={`p-3 rounded-md border-2 ${getPriorityColor(
+                className={`p-4 rounded-lg border-2 ${getPriorityColor(
                   alertData.priority
                 )}`}
               >
-                <h4 className="font-semibold text-sm mb-2">
-                  Guest Information:
+                <h4 className="font-semibold text-base mb-3 flex items-center gap-2">
+                  <User className="h-4 w-4" />
+                  Guest Information Summary
                 </h4>
-                <div className="text-sm space-y-1">
-                  <p>
-                    <strong>Name:</strong> {selectedGuest.name}
-                  </p>
-                  <p>
-                    <strong>Room:</strong> {roomNumber}
-                  </p>
-                  <p>
-                    <strong>Phone:</strong> {selectedGuest.phone}
-                  </p>
-                  <p>
-                    <strong>Nationality:</strong> {selectedGuest.nationality}
-                  </p>
-                  <p>
-                    <strong>Purpose:</strong> {selectedGuest.purpose}
-                  </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <span className="font-medium">Name:</span>{" "}
+                    {selectedGuest.name}
+                  </div>
+                  <div>
+                    <span className="font-medium">Room:</span> {roomNumber}
+                  </div>
+                  <div>
+                    <span className="font-medium">Phone:</span>{" "}
+                    {selectedGuest.phone}
+                  </div>
+                  <div>
+                    <span className="font-medium">Nationality:</span>{" "}
+                    {selectedGuest.nationality}
+                  </div>
+                  <div className="sm:col-span-2">
+                    <span className="font-medium">Purpose:</span>{" "}
+                    {selectedGuest.purpose}
+                  </div>
                 </div>
               </div>
             )}
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="flex flex-col sm:flex-row gap-2">
             <Button
               variant="outline"
               onClick={() => setAlertDialogOpen(false)}
               disabled={submitting}
+              className="w-full sm:w-auto"
             >
               Cancel
             </Button>
@@ -510,8 +681,19 @@ const AlertPolicePage = () => {
                 !alertData.title.trim() ||
                 !alertData.description.trim()
               }
+              className="w-full sm:w-auto"
             >
-              {submitting ? "Creating Alert..." : "Create Police Alert"}
+              {submitting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Creating Alert...
+                </>
+              ) : (
+                <>
+                  <AlertTriangle className="h-4 w-4 mr-2" />
+                  Create Police Alert
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

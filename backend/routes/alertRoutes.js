@@ -1,4 +1,4 @@
-// routes/alertRoutes.js - TEMPORARY VERSION WITHOUT CONDITIONAL MIDDLEWARE
+// routes/alertRoutes.js - UPDATED with activity logging
 const express = require("express");
 const router = express.Router();
 const {
@@ -11,6 +11,7 @@ const {
   assignAlert,
   addTimelineEntry,
 } = require("../controllers/alertController");
+const { logActivity } = require("../controllers/activityController");
 const {
   auth,
   validateHotelAccess,
@@ -26,7 +27,7 @@ router.post("/", createAlert);
 router.get("/", getAllAlerts);
 router.get("/stats", getAlertStats);
 
-// Alert filtering and search routes
+// Alert filtering and search routes with activity logging
 router.get("/filter/priority/:priority", async (req, res) => {
   try {
     const { priority } = req.params;
@@ -48,6 +49,24 @@ router.get("/filter/priority/:priority", async (req, res) => {
       .populate("guestId", "name roomNumber phone")
       .sort({ createdAt: -1 })
       .limit(parseInt(limit));
+
+    // Log alert filtering activity if accessed by police
+    if (req.user?.policeId) {
+      await logActivity(
+        req.user.policeId.toString(),
+        "alert_viewed",
+        "alert",
+        `filter_priority_${priority}`,
+        {
+          filterType: "priority",
+          priority,
+          status,
+          resultsCount: alerts.length,
+          hotelId: req.hotelId,
+        },
+        req
+      );
+    }
 
     res.json({
       priority,
@@ -93,6 +112,24 @@ router.get("/filter/type/:type", async (req, res) => {
       .sort({ priority: -1, createdAt: -1 })
       .limit(parseInt(limit));
 
+    // Log alert filtering activity if accessed by police
+    if (req.user?.policeId) {
+      await logActivity(
+        req.user.policeId.toString(),
+        "alert_viewed",
+        "alert",
+        `filter_type_${type}`,
+        {
+          filterType: "type",
+          alertType: type,
+          status,
+          resultsCount: alerts.length,
+          hotelId: req.hotelId,
+        },
+        req
+      );
+    }
+
     res.json({
       type,
       alerts: alerts.map((alert) => ({
@@ -116,7 +153,7 @@ router.get("/filter/type/:type", async (req, res) => {
   }
 });
 
-// Alert analytics
+// Alert analytics with activity logging
 router.get("/analytics/summary", async (req, res) => {
   try {
     const { period = "30" } = req.query;
@@ -179,6 +216,24 @@ router.get("/analytics/summary", async (req, res) => {
       ]),
     ]);
 
+    // Log analytics viewing
+    if (req.user?.policeId) {
+      await logActivity(
+        req.user.policeId.toString(),
+        "report_viewed",
+        "report",
+        `alert_analytics_${req.hotelId}`,
+        {
+          reportType: "alert_analytics",
+          period,
+          hotelId: req.hotelId,
+          totalAlerts,
+          activeAlerts,
+        },
+        req
+      );
+    }
+
     res.json({
       period: `${period} days`,
       summary: {
@@ -201,7 +256,7 @@ router.get("/analytics/summary", async (req, res) => {
   }
 });
 
-// Bulk operations
+// Bulk operations with activity logging
 router.post("/bulk/resolve", async (req, res) => {
   try {
     const { alertIds, resolution } = req.body;
@@ -235,8 +290,10 @@ router.post("/bulk/resolve", async (req, res) => {
         alert.resolution = {
           summary: resolution?.summary || "Bulk resolved",
           resolvedBy: {
-            name: "Hotel Staff",
-            role: "Staff",
+            name: req.user?.name || "Hotel Staff",
+            role: req.user?.policeRole
+              ? `Police - ${req.user.rank}`
+              : "Hotel Staff",
           },
           resolvedAt: new Date(),
           actionsTaken: resolution?.actionsTaken || ["Bulk resolution"],
@@ -245,8 +302,10 @@ router.post("/bulk/resolve", async (req, res) => {
         alert.timeline.push({
           action: "Resolved",
           performedBy: {
-            name: "Hotel Staff",
-            role: "Staff",
+            name: req.user?.name || "Hotel Staff",
+            role: req.user?.policeRole
+              ? `Police - ${req.user.rank}`
+              : "Hotel Staff",
           },
           timestamp: new Date(),
           notes: "Bulk resolution",
@@ -263,6 +322,24 @@ router.post("/bulk/resolve", async (req, res) => {
       }
     }
 
+    // Log bulk resolution activity
+    if (results.length > 0) {
+      await logActivity(
+        req.user?.policeId?.toString() || "hotel_staff",
+        "alert_updated",
+        "alert",
+        "bulk_resolution",
+        {
+          action: "bulk_resolve",
+          resolvedCount: results.length,
+          failedCount: errors.length,
+          hotelId: req.hotelId,
+          performedBy: req.user?.name || "Hotel Staff",
+        },
+        req
+      );
+    }
+
     res.json({
       message: `Bulk resolution completed. ${results.length} alerts resolved.`,
       results,
@@ -276,8 +353,7 @@ router.post("/bulk/resolve", async (req, res) => {
   }
 });
 
-// DYNAMIC ROUTES LAST - SIMPLIFIED WITHOUT CONDITIONAL MIDDLEWARE
-// Temporarily removing validateHotelAccess to test
+// DYNAMIC ROUTES LAST
 router.get("/:id", getAlertById);
 router.put("/:id/status", updateAlertStatus);
 router.put("/:id/assign", assignAlert);

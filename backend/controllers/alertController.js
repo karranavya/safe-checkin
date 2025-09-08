@@ -1,8 +1,9 @@
-// controllers/alertController.js
+// controllers/alertController.js - UPDATED with activity logging
 const Alert = require("../models/Alert");
 const Guest = require("../models/Guest");
+const { logActivity } = require("./activityController");
 
-// Create new alert
+// Create new alert - UPDATED with activity logging
 const createAlert = async (req, res) => {
   try {
     const {
@@ -90,6 +91,24 @@ const createAlert = async (req, res) => {
 
     await alert.save();
 
+    // Log alert creation activity
+    await logActivity(
+      req.user?.policeId || "hotel_staff",
+      "alert_created",
+      "alert",
+      alert._id,
+      {
+        alertType: alert.type,
+        priority: alert.priority,
+        title: alert.title,
+        guestName: guest.name,
+        roomNumber: location.roomNumber,
+        assignedTo: assignedTo?.name,
+        hotelId: req.hotelId,
+      },
+      req
+    );
+
     // Add alert to guest's record - Initialize alertsSent if it doesn't exist
     if (!guest.alertsSent) {
       guest.alertsSent = [];
@@ -145,7 +164,158 @@ const createAlert = async (req, res) => {
   }
 };
 
-// Get all alerts for hotel
+// Update alert status - UPDATED with activity logging
+const updateAlertStatus = async (req, res) => {
+  try {
+    const { status, notes, resolution } = req.body;
+
+    if (!status) {
+      return res.status(400).json({
+        error: "Status is required",
+      });
+    }
+
+    const validStatuses = [
+      "Pending",
+      "Acknowledged",
+      "In Progress",
+      "Resolved",
+      "Cancelled",
+    ];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({
+        error: "Invalid status",
+        validStatuses,
+      });
+    }
+
+    const alert = await Alert.findOne({
+      _id: req.params.id,
+      hotelId: req.hotelId,
+    });
+
+    if (!alert) {
+      return res.status(404).json({
+        error: "Alert not found",
+      });
+    }
+
+    const previousStatus = alert.status;
+
+    // Update status
+    alert.status = status;
+
+    // Add timeline entry
+    alert.timeline.push({
+      action: status,
+      performedBy: {
+        name: req.user?.name || "Hotel Staff",
+        role: req.user?.policeRole
+          ? `Police - ${req.user.rank}`
+          : "Hotel Staff",
+      },
+      timestamp: new Date(),
+      notes: notes || `Status changed to ${status}`,
+    });
+
+    // Handle resolution
+    if (status === "Resolved") {
+      alert.resolution = {
+        summary: resolution?.summary || "Alert resolved",
+        resolvedBy: {
+          name: req.user?.name || "Hotel Staff",
+          role: req.user?.policeRole
+            ? `Police - ${req.user.rank}`
+            : "Hotel Staff",
+        },
+        resolvedAt: new Date(),
+        actionsTaken: resolution?.actionsTaken || [],
+      };
+    }
+
+    await alert.save();
+
+    // Log alert status update activity
+    await logActivity(
+      req.user?.policeId || "hotel_staff",
+      "alert_updated",
+      "alert",
+      alert._id,
+      {
+        alertTitle: alert.title,
+        previousStatus,
+        newStatus: status,
+        notes: notes,
+        resolvedBy: req.user?.name,
+        isResolution: status === "Resolved",
+      },
+      req
+    );
+
+    res.json({
+      message: `Alert status updated to ${status}`,
+      alert: {
+        id: alert._id,
+        title: alert.title,
+        status: alert.status,
+        updatedAt: alert.updatedAt,
+        resolution: alert.resolution,
+      },
+    });
+  } catch (error) {
+    console.error("Update alert status error:", error);
+    res.status(500).json({
+      error: "Failed to update alert status",
+    });
+  }
+};
+
+// Delete alert - UPDATED with activity logging
+const deleteAlert = async (req, res) => {
+  try {
+    const alert = await Alert.findOneAndDelete({
+      _id: req.params.id,
+      hotelId: req.hotelId,
+    });
+
+    if (!alert) {
+      return res.status(404).json({
+        error: "Alert not found",
+      });
+    }
+
+    // Log alert deletion activity
+    await logActivity(
+      req.user?.policeId || "hotel_staff",
+      "alert_removed",
+      "alert",
+      alert._id,
+      {
+        alertTitle: alert.title,
+        alertType: alert.type,
+        priority: alert.priority,
+        deletedBy: req.user?.name || "Hotel Staff",
+      },
+      req
+    );
+
+    res.json({
+      message: "Alert deleted successfully",
+      deletedAlert: {
+        id: alert._id,
+        title: alert.title,
+        deletedAt: new Date(),
+      },
+    });
+  } catch (error) {
+    console.error("Delete alert error:", error);
+    res.status(500).json({
+      error: "Failed to delete alert",
+    });
+  }
+};
+
+// Keep all other existing functions unchanged...
 const getAllAlerts = async (req, res) => {
   try {
     const {
@@ -242,7 +412,6 @@ const getAllAlerts = async (req, res) => {
   }
 };
 
-// Get alert by ID
 const getAlertById = async (req, res) => {
   try {
     const alert = await Alert.findOne({
@@ -296,90 +465,6 @@ const getAlertById = async (req, res) => {
   }
 };
 
-// Update alert status
-const updateAlertStatus = async (req, res) => {
-  try {
-    const { status, notes, resolution } = req.body;
-
-    if (!status) {
-      return res.status(400).json({
-        error: "Status is required",
-      });
-    }
-
-    const validStatuses = [
-      "Pending",
-      "Acknowledged",
-      "In Progress",
-      "Resolved",
-      "Cancelled",
-    ];
-    if (!validStatuses.includes(status)) {
-      return res.status(400).json({
-        error: "Invalid status",
-        validStatuses,
-      });
-    }
-
-    const alert = await Alert.findOne({
-      _id: req.params.id,
-      hotelId: req.hotelId,
-    });
-
-    if (!alert) {
-      return res.status(404).json({
-        error: "Alert not found",
-      });
-    }
-
-    // Update status
-    alert.status = status;
-
-    // Add timeline entry
-    alert.timeline.push({
-      action: status,
-      performedBy: {
-        name: "Hotel Staff",
-        role: "Hotel Staff",
-      },
-      timestamp: new Date(),
-      notes: notes || `Status changed to ${status}`,
-    });
-
-    // Handle resolution
-    if (status === "Resolved") {
-      alert.resolution = {
-        summary: resolution?.summary || "Alert resolved",
-        resolvedBy: {
-          name: "Hotel Staff",
-          role: "Hotel Staff",
-        },
-        resolvedAt: new Date(),
-        actionsTaken: resolution?.actionsTaken || [],
-      };
-    }
-
-    await alert.save();
-
-    res.json({
-      message: `Alert status updated to ${status}`,
-      alert: {
-        id: alert._id,
-        title: alert.title,
-        status: alert.status,
-        updatedAt: alert.updatedAt,
-        resolution: alert.resolution,
-      },
-    });
-  } catch (error) {
-    console.error("Update alert status error:", error);
-    res.status(500).json({
-      error: "Failed to update alert status",
-    });
-  }
-};
-
-// Assign alert to someone
 const assignAlert = async (req, res) => {
   try {
     const { assignedTo, notes } = req.body;
@@ -413,8 +498,10 @@ const assignAlert = async (req, res) => {
     alert.timeline.push({
       action: "Assigned",
       performedBy: {
-        name: "Hotel Staff",
-        role: "Hotel Staff",
+        name: req.user?.name || "Hotel Staff",
+        role: req.user?.policeRole
+          ? `Police - ${req.user.rank}`
+          : "Hotel Staff",
       },
       timestamp: new Date(),
       notes: notes || `Assigned to ${assignedTo.name}`,
@@ -439,7 +526,6 @@ const assignAlert = async (req, res) => {
   }
 };
 
-// Add timeline entry
 const addTimelineEntry = async (req, res) => {
   try {
     const { action, notes } = req.body;
@@ -465,8 +551,10 @@ const addTimelineEntry = async (req, res) => {
     alert.timeline.push({
       action,
       performedBy: {
-        name: "Hotel Staff",
-        role: "Hotel Staff",
+        name: req.user?.name || "Hotel Staff",
+        role: req.user?.policeRole
+          ? `Police - ${req.user.rank}`
+          : "Hotel Staff",
       },
       timestamp: new Date(),
       notes: notes || "",
@@ -486,37 +574,6 @@ const addTimelineEntry = async (req, res) => {
   }
 };
 
-// Delete alert
-const deleteAlert = async (req, res) => {
-  try {
-    const alert = await Alert.findOneAndDelete({
-      _id: req.params.id,
-      hotelId: req.hotelId,
-    });
-
-    if (!alert) {
-      return res.status(404).json({
-        error: "Alert not found",
-      });
-    }
-
-    res.json({
-      message: "Alert deleted successfully",
-      deletedAlert: {
-        id: alert._id,
-        title: alert.title,
-        deletedAt: new Date(),
-      },
-    });
-  } catch (error) {
-    console.error("Delete alert error:", error);
-    res.status(500).json({
-      error: "Failed to delete alert",
-    });
-  }
-};
-
-// Get alert statistics
 const getAlertStats = async (req, res) => {
   try {
     const { period = "30" } = req.query;

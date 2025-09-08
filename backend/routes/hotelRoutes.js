@@ -1,4 +1,4 @@
-// routes/hotelRoutes.js
+// routes/hotelRoutes.js - FIXED hotel verification route placement
 const express = require("express");
 const router = express.Router();
 
@@ -13,11 +13,11 @@ const {
   logoutHotel,
   getHotelStats,
   getAllHotels,
+  verifyHotel,
 } = require("../controllers/hotelAuthController");
 const { auth, rateLimiter } = require("../middleware/auth");
 
 // Public routes (no authentication required)
-
 router.post("/login", loginHotel);
 router.post(
   "/register",
@@ -34,8 +34,12 @@ router.post(
   registerHotel
 );
 router.get("/all", getAllHotels);
-// Protected routes (authentication required)
-router.use(auth); // All routes below require authentication
+
+// Police-only routes (before hotel auth middleware)
+router.post("/verify/:hotelId", authenticatePolice, verifyHotel);
+
+// Protected routes (hotel authentication required)
+router.use(auth); // All routes below require hotel authentication
 
 // Hotel profile management
 router.get("/profile", getHotelProfile);
@@ -57,6 +61,5 @@ router.get("/health", (req, res) => {
     timestamp: new Date().toISOString(),
   });
 });
-// router.get("/all", getAllHotels); // Add this route
 
 module.exports = router;

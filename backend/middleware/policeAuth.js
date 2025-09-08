@@ -1,10 +1,11 @@
-// middleware/policeAuth.js - UPDATED with role-based access and activity logging
+// middleware/policeAuth.js - ENHANCED VERSION
 const jwt = require("jsonwebtoken");
+const Police = require("../models/Police");
 const { logActivity } = require("../controllers/activityController");
 
-const authenticatePolice = (req, res, next) => {
+// Enhanced police authentication with activity tracking
+const authenticatePolice = async (req, res, next) => {
   try {
-    // Get token from Authorization header
     const authHeader = req.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -15,7 +16,7 @@ const authenticatePolice = (req, res, next) => {
       });
     }
 
-    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
+    const token = authHeader.substring(7);
 
     if (!token) {
       return res.status(401).json({
@@ -25,14 +26,13 @@ const authenticatePolice = (req, res, next) => {
       });
     }
 
-    // Verify token
     const JWT_SECRET =
       process.env.JWT_SECRET || "default-secret-change-in-production";
 
     try {
       const decoded = jwt.verify(token, JWT_SECRET);
 
-      // Check if user has police role/permissions
+      // Check if user has police role
       if (!decoded.role || decoded.role !== "police") {
         return res.status(403).json({
           success: false,
@@ -41,8 +41,35 @@ const authenticatePolice = (req, res, next) => {
         });
       }
 
-      // Add user info to request (INCLUDING ROLE)
-      req.user = decoded;
+      // Verify police officer still exists and is active
+      const police = await Police.findById(decoded.policeId);
+
+      if (!police) {
+        return res.status(401).json({
+          success: false,
+          error: "Police officer not found.",
+          code: "OFFICER_NOT_FOUND",
+        });
+      }
+
+      if (!police.isActive) {
+        return res.status(401).json({
+          success: false,
+          error: "Police officer account is inactive.",
+          code: "INACTIVE_ACCOUNT",
+        });
+      }
+
+      // Update police officer's activity
+      await police.updateActivity();
+
+      // Add enhanced user info to request
+      req.user = {
+        ...decoded,
+        police: police,
+        type: "police",
+      };
+
       next();
     } catch (jwtError) {
       console.error("JWT Verification Error:", jwtError.message);
@@ -79,7 +106,7 @@ const authenticatePolice = (req, res, next) => {
   }
 };
 
-// Role-based middleware functions
+// Enhanced role-based middleware
 const requireAdminPolice = (req, res, next) => {
   if (req.user.policeRole !== "admin_police") {
     return res.status(403).json({
@@ -113,43 +140,65 @@ const requireAnyPolice = (req, res, next) => {
   next();
 };
 
-// Activity logging middleware for sub-police actions
-const logSubPoliceActivity = (action, targetType) => {
+// Enhanced activity logging for police actions
+const logPoliceActivity = (action, targetType) => {
   return async (req, res, next) => {
-    // Store original res.json to intercept successful responses
     const originalJson = res.json;
 
     res.json = function (data) {
-      // Only log if the operation was successful and user is sub-police
-      if (data.success && req.user && req.user.policeRole === "sub_police") {
-        // Extract target ID from request or response
+      // Log activity after successful response
+      if (data.success && req.user && req.user.policeId) {
         const targetId =
           req.params.id ||
           req.params.hotelId ||
+          req.params.officerId ||
           req.params.suspectId ||
           req.params.alertId ||
           (data.data && data.data.id) ||
-          new Date();
+          `police_action_${Date.now()}`;
 
-        // Log the activity asynchronously (don't wait for it)
+        // Enhanced activity details
+        const activityDetails = {
+          method: req.method,
+          path: req.path,
+          officerName: req.user.name,
+          officerRank: req.user.rank,
+          station: req.user.station,
+          timestamp: new Date(),
+          ...(req.body &&
+            Object.keys(req.body).length > 0 && { requestBody: req.body }),
+        };
+
+        // Log asynchronously
         logActivity(
-          req.user.policeId,
+          req.user.policeId.toString(),
           action,
           targetType,
-          targetId,
-          {
-            method: req.method,
-            path: req.path,
-            body: req.body,
-            timestamp: new Date(),
-          },
+          targetId.toString(),
+          activityDetails,
           req
-        ).catch((err) => console.error("Activity logging failed:", err));
+        ).catch((err) => console.error("Police activity logging failed:", err));
       }
 
-      // Call original res.json
       return originalJson.call(this, data);
     };
+
+    next();
+  };
+};
+
+// Permission-based middleware
+const requirePermission = (permission) => {
+  return (req, res, next) => {
+    const police = req.user.police;
+
+    if (!police || !police.permissions || !police.permissions[permission]) {
+      return res.status(403).json({
+        success: false,
+        error: `Access denied. ${permission} permission required.`,
+        code: "PERMISSION_DENIED",
+      });
+    }
 
     next();
   };
@@ -160,5 +209,6 @@ module.exports = {
   requireAdminPolice,
   requireSubPolice,
   requireAnyPolice,
-  logSubPoliceActivity,
+  logPoliceActivity,
+  requirePermission,
 };

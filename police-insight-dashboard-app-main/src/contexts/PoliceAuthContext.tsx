@@ -86,10 +86,32 @@ export const PoliceAuthProvider: React.FC<PoliceAuthProviderProps> = ({
     setIsLoading(false); // This is crucial - always set loading to false
   }, []);
 
+  // Make sure the login function properly stores all user data
+  // In PoliceAuthContext.tsx
   const login = (newToken: string, newUser: PoliceUser) => {
-    console.log("Login called with user:", newUser.name);
+    console.log("🔐 Login function called");
+    console.log("Token being stored:", newToken);
+    console.log("User being stored:", newUser.name);
+
+    // ✅ Store in both localStorage and sessionStorage
+    localStorage.setItem("policeToken", newToken);
+    sessionStorage.setItem("policeToken", newToken);
+
+    // ✅ Store user data with token
+    const authData = {
+      token: newToken,
+      police: newUser,
+      policeId: newUser.id,
+      loginTime: Date.now(),
+    };
+
+    localStorage.setItem("police-dashboard-auth", JSON.stringify(authData));
+    sessionStorage.setItem("police-dashboard-auth", JSON.stringify(authData));
+
     setToken(newToken);
     setUser(newUser);
+
+    console.log("✅ Token and user data stored successfully");
   };
 
   const logout = () => {

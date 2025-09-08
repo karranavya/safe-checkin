@@ -1,13 +1,14 @@
+// controllers/guestController.js - UPDATED with activity logging
 const Guest = require("../models/Guest");
 const Hotel = require("../models/Hotel");
-const User = require("../models/User"); // Add this import
+const User = require("../models/User");
+const { logActivity } = require("./activityController");
 const { validationResult } = require("express-validator");
 
-// Check in a new guest
+// Check in a new guest - UPDATED with activity logging
 const checkInGuest = async (req, res) => {
   try {
     const errors = validationResult(req);
-    // console.log("Validation errors:", errors.array());
     if (!errors.isEmpty()) {
       return res.status(400).json({
         success: false,
@@ -69,6 +70,46 @@ const checkInGuest = async (req, res) => {
     const guest = new Guest(guestData);
     await guest.save();
 
+    // Log guest check-in activity
+    await logActivity(
+      req.user.policeId || userId, // Use police ID if available, otherwise user ID
+      "guest_checked",
+      "guest",
+      guest._id,
+      {
+        guestName: guest.name,
+        roomNumber: guest.roomNumber,
+        hotelName: hotel.name,
+        checkInDate: guest.checkInTime,
+        numberOfGuests: guest.guests?.length || 1,
+        action: "check_in",
+      },
+      req
+    );
+
+    // Check if guest should be flagged based on any criteria
+    const shouldFlag = await checkGuestForFlags(guest);
+    if (shouldFlag.flag) {
+      guest.isFlagged = true;
+      guest.flagReason = shouldFlag.reason;
+      await guest.save();
+
+      // Log flagging activity
+      await logActivity(
+        req.user.policeId || userId,
+        "guest_flagged",
+        "guest",
+        guest._id,
+        {
+          guestName: guest.name,
+          flagReason: shouldFlag.reason,
+          hotelName: hotel.name,
+          autoFlagged: true,
+        },
+        req
+      );
+    }
+
     // Populate the response with proper error handling
     try {
       await guest.populate([
@@ -80,7 +121,6 @@ const checkInGuest = async (req, res) => {
         "Population failed, returning guest without populated fields:",
         populateError
       );
-      // Continue without population if it fails
     }
 
     res.status(201).json({
@@ -98,7 +138,333 @@ const checkInGuest = async (req, res) => {
   }
 };
 
-// Get all guests for the hotel
+// Check out guest - UPDATED with activity logging
+const checkOutGuest = async (req, res) => {
+  try {
+    const hotelId = req.user.hotelId;
+    const userId = req.user.id;
+    const { id } = req.params;
+    const { checkOutDate, finalAmount, notes } = req.body;
+
+    const guest = await Guest.findOne({ _id: id, hotelId });
+
+    if (!guest) {
+      return res.status(404).json({
+        success: false,
+        message: "Guest not found",
+      });
+    }
+
+    if (guest.status === "checked-out") {
+      return res.status(400).json({
+        success: false,
+        message: "Guest is already checked out",
+      });
+    }
+
+    // Get hotel info for logging
+    const hotel = await Hotel.findById(hotelId);
+
+    // Update guest checkout details
+    const previousStatus = guest.status;
+    guest.status = "checked-out";
+    guest.checkOutDate = checkOutDate ? new Date(checkOutDate) : new Date();
+    guest.updatedBy = userId;
+
+    if (finalAmount !== undefined) {
+      guest.totalAmount = finalAmount;
+      guest.updateBalance();
+    }
+
+    if (notes) {
+      guest.notes = notes;
+    }
+
+    await guest.save();
+
+    // Log checkout activity
+    await logActivity(
+      req.user.policeId || userId,
+      "guest_checked",
+      "guest",
+      guest._id,
+      {
+        guestName: guest.name,
+        roomNumber: guest.roomNumber,
+        hotelName: hotel?.name,
+        checkOutDate: guest.checkOutDate,
+        finalAmount: guest.totalAmount,
+        previousStatus,
+        action: "check_out",
+      },
+      req
+    );
+
+    // Try to populate, but continue if it fails
+    try {
+      await guest.populate([
+        { path: "createdBy", select: "name email", model: "User" },
+        { path: "updatedBy", select: "name email", model: "User" },
+      ]);
+    } catch (populateError) {
+      console.warn("Population failed for checkout:", populateError);
+    }
+
+    res.json({
+      success: true,
+      message: "Guest checked out successfully",
+      data: guest,
+    });
+  } catch (error) {
+    console.error("Error in checkOutGuest:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error checking out guest",
+      error: error.message,
+    });
+  }
+};
+
+// Update guest information - UPDATED with activity logging
+const updateGuest = async (req, res) => {
+  try {
+    const hotelId = req.user.hotelId;
+    const userId = req.user.id;
+    const { id } = req.params;
+
+    const guest = await Guest.findOne({ _id: id, hotelId });
+
+    if (!guest) {
+      return res.status(404).json({
+        success: false,
+        message: "Guest not found",
+      });
+    }
+
+    // Don't allow updating checked-out guests
+    if (guest.status === "checked-out") {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot update checked-out guest",
+      });
+    }
+
+    // Store previous data for logging
+    const previousData = {
+      name: guest.name,
+      phone: guest.phone,
+      roomNumber: guest.roomNumber,
+      status: guest.status,
+    };
+
+    // Track which fields are being updated
+    const updatedFields = [];
+    Object.keys(req.body).forEach((key) => {
+      if (
+        req.body[key] !== undefined &&
+        key !== "hotelId" &&
+        key !== "createdBy" &&
+        guest[key] !== req.body[key]
+      ) {
+        guest[key] = req.body[key];
+        updatedFields.push(key);
+      }
+    });
+
+    guest.updatedBy = userId;
+    await guest.save();
+
+    // Log update activity if there were actual changes
+    if (updatedFields.length > 0) {
+      const hotel = await Hotel.findById(hotelId);
+
+      await logActivity(
+        req.user.policeId || userId,
+        "suspect_updated", // Using suspect_updated for guest updates
+        "guest",
+        guest._id,
+        {
+          guestName: guest.name,
+          hotelName: hotel?.name,
+          updatedFields,
+          previousData,
+          newData: req.body,
+        },
+        req
+      );
+    }
+
+    // Try to populate, but continue if it fails
+    try {
+      await guest.populate([
+        { path: "createdBy", select: "name email", model: "User" },
+        { path: "updatedBy", select: "name email", model: "User" },
+      ]);
+    } catch (populateError) {
+      console.warn("Population failed for update:", populateError);
+    }
+
+    res.json({
+      success: true,
+      message: "Guest updated successfully",
+      data: guest,
+    });
+  } catch (error) {
+    console.error("Error in updateGuest:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error updating guest",
+      error: error.message,
+    });
+  }
+};
+
+// Flag guest manually - NEW function with activity logging
+const flagGuest = async (req, res) => {
+  try {
+    const hotelId = req.user.hotelId;
+    const userId = req.user.id;
+    const { id } = req.params;
+    const { flagReason, notes } = req.body;
+
+    const guest = await Guest.findOne({ _id: id, hotelId });
+    if (!guest) {
+      return res.status(404).json({
+        success: false,
+        message: "Guest not found",
+      });
+    }
+
+    const hotel = await Hotel.findById(hotelId);
+
+    guest.isFlagged = true;
+    guest.flagReason = flagReason;
+    if (notes) guest.notes = notes;
+    guest.updatedBy = userId;
+
+    await guest.save();
+
+    // Log flagging activity
+    await logActivity(
+      req.user.policeId || userId,
+      "guest_flagged",
+      "guest",
+      guest._id,
+      {
+        guestName: guest.name,
+        roomNumber: guest.roomNumber,
+        hotelName: hotel?.name,
+        flagReason,
+        notes,
+        manualFlag: true,
+      },
+      req
+    );
+
+    res.json({
+      success: true,
+      message: "Guest flagged successfully",
+      data: guest,
+    });
+  } catch (error) {
+    console.error("Error in flagGuest:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error flagging guest",
+      error: error.message,
+    });
+  }
+};
+
+// View guest details - UPDATED with activity logging for police access
+const getGuestById = async (req, res) => {
+  try {
+    const hotelId = req.user.hotelId;
+    const { id } = req.params;
+
+    const guest = await Guest.findOne({ _id: id, hotelId });
+
+    if (!guest) {
+      return res.status(404).json({
+        success: false,
+        message: "Guest not found",
+      });
+    }
+
+    // Log viewing activity if accessed by police
+    if (req.user.policeId) {
+      const hotel = await Hotel.findById(hotelId);
+
+      await logActivity(
+        req.user.policeId,
+        "suspect_viewed",
+        "guest",
+        guest._id,
+        {
+          guestName: guest.name,
+          roomNumber: guest.roomNumber,
+          hotelName: hotel?.name,
+          viewedBy: req.user.name || "Police Officer",
+        },
+        req
+      );
+    }
+
+    // Try to populate, but continue if it fails
+    try {
+      await guest.populate([
+        { path: "createdBy", select: "name email", model: "User" },
+        { path: "updatedBy", select: "name email", model: "User" },
+        { path: "hotelId", select: "name address" },
+      ]);
+    } catch (populateError) {
+      console.warn("Population failed for guest details:", populateError);
+    }
+
+    res.json({
+      success: true,
+      data: guest,
+    });
+  } catch (error) {
+    console.error("Error in getGuestById:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching guest",
+      error: error.message,
+    });
+  }
+};
+
+// Helper function to check if guest should be flagged
+const checkGuestForFlags = async (guest) => {
+  // Add your flagging logic here
+  // For example, check against suspect lists, previous incidents, etc.
+
+  try {
+    // Example criteria - you can expand this
+    const flagCriteria = [
+      // Check for suspicious patterns
+      guest.guests && guest.guests.length > 6, // Too many guests
+      // Add more criteria as needed
+    ];
+
+    for (let criterion of flagCriteria) {
+      if (criterion) {
+        return {
+          flag: true,
+          reason: "Suspicious activity detected",
+        };
+      }
+    }
+
+    return { flag: false };
+  } catch (error) {
+    console.error("Error in checkGuestForFlags:", error);
+    return { flag: false };
+  }
+};
+
+// Keep all other existing functions unchanged...
 const getAllGuests = async (req, res) => {
   try {
     const hotelId = req.user.hotelId;
@@ -167,7 +533,6 @@ const getAllGuests = async (req, res) => {
   }
 };
 
-// Check uniqueness (for validation during form filling)
 const validateUniqueness = async (req, res) => {
   try {
     const hotelId = req.user.hotelId;
@@ -226,47 +591,6 @@ const validateUniqueness = async (req, res) => {
   }
 };
 
-// Get guest by ID
-const getGuestById = async (req, res) => {
-  try {
-    const hotelId = req.user.hotelId;
-    const { id } = req.params;
-
-    const guest = await Guest.findOne({ _id: id, hotelId });
-
-    if (!guest) {
-      return res.status(404).json({
-        success: false,
-        message: "Guest not found",
-      });
-    }
-
-    // Try to populate, but continue if it fails
-    try {
-      await guest.populate([
-        { path: "createdBy", select: "name email", model: "User" },
-        { path: "updatedBy", select: "name email", model: "User" },
-        { path: "hotelId", select: "name address" },
-      ]);
-    } catch (populateError) {
-      console.warn("Population failed for guest details:", populateError);
-    }
-
-    res.json({
-      success: true,
-      data: guest,
-    });
-  } catch (error) {
-    console.error("Error in getGuestById:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error fetching guest",
-      error: error.message,
-    });
-  }
-};
-
-// Get guests by room number
 const getGuestByRoom = async (req, res) => {
   try {
     const hotelId = req.user.hotelId;
@@ -296,7 +620,6 @@ const getGuestByRoom = async (req, res) => {
   }
 };
 
-// Get all guests grouped by room
 const getAllGuestsByRoom = async (req, res) => {
   try {
     const hotelId = req.user.hotelId;
@@ -344,134 +667,6 @@ const getAllGuestsByRoom = async (req, res) => {
   }
 };
 
-// Check out guest
-const checkOutGuest = async (req, res) => {
-  try {
-    const hotelId = req.user.hotelId;
-    const userId = req.user.id;
-    const { id } = req.params;
-    const { checkOutDate, finalAmount, notes } = req.body;
-
-    const guest = await Guest.findOne({ _id: id, hotelId });
-
-    if (!guest) {
-      return res.status(404).json({
-        success: false,
-        message: "Guest not found",
-      });
-    }
-
-    if (guest.status === "checked-out") {
-      return res.status(400).json({
-        success: false,
-        message: "Guest is already checked out",
-      });
-    }
-
-    // Update guest checkout details
-    guest.status = "checked-out";
-    guest.checkOutDate = checkOutDate ? new Date(checkOutDate) : new Date();
-    guest.updatedBy = userId;
-
-    if (finalAmount !== undefined) {
-      guest.totalAmount = finalAmount;
-      guest.updateBalance();
-    }
-
-    if (notes) {
-      guest.notes = notes;
-    }
-
-    await guest.save();
-
-    // Try to populate, but continue if it fails
-    try {
-      await guest.populate([
-        { path: "createdBy", select: "name email", model: "User" },
-        { path: "updatedBy", select: "name email", model: "User" },
-      ]);
-    } catch (populateError) {
-      console.warn("Population failed for checkout:", populateError);
-    }
-
-    res.json({
-      success: true,
-      message: "Guest checked out successfully",
-      data: guest,
-    });
-  } catch (error) {
-    console.error("Error in checkOutGuest:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error checking out guest",
-      error: error.message,
-    });
-  }
-};
-
-// Update guest information
-const updateGuest = async (req, res) => {
-  try {
-    const hotelId = req.user.hotelId;
-    const userId = req.user.id;
-    const { id } = req.params;
-
-    const guest = await Guest.findOne({ _id: id, hotelId });
-
-    if (!guest) {
-      return res.status(404).json({
-        success: false,
-        message: "Guest not found",
-      });
-    }
-
-    // Don't allow updating checked-out guests
-    if (guest.status === "checked-out") {
-      return res.status(400).json({
-        success: false,
-        message: "Cannot update checked-out guest",
-      });
-    }
-
-    // Update fields
-    Object.keys(req.body).forEach((key) => {
-      if (
-        req.body[key] !== undefined &&
-        key !== "hotelId" &&
-        key !== "createdBy"
-      ) {
-        guest[key] = req.body[key];
-      }
-    });
-
-    guest.updatedBy = userId;
-    await guest.save();
-
-    // Try to populate, but continue if it fails
-    try {
-      await guest.populate([
-        { path: "createdBy", select: "name email", model: "User" },
-        { path: "updatedBy", select: "name email", model: "User" },
-      ]);
-    } catch (populateError) {
-      console.warn("Population failed for update:", populateError);
-    }
-
-    res.json({
-      success: true,
-      message: "Guest updated successfully",
-      data: guest,
-    });
-  } catch (error) {
-    console.error("Error in updateGuest:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error updating guest",
-      error: error.message,
-    });
-  }
-};
-
 // Legacy function for backward compatibility
 const checkUnique = async (req, res) => {
   return validateUniqueness(req, res);
@@ -487,4 +682,5 @@ module.exports = {
   getAllGuestsByRoom,
   checkOutGuest,
   updateGuest,
+  flagGuest, // Add the new flagGuest function
 };

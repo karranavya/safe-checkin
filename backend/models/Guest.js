@@ -154,6 +154,42 @@ const guestSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
     },
+    isFlagged: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    flagReason: {
+      type: String,
+      default: null,
+    },
+    flaggedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Police",
+      default: null,
+    },
+    flaggedAt: {
+      type: Date,
+      default: null,
+    },
+    // END FLAGGING FIELDS
+
+    // Add alert tracking
+    alertsSent: [
+      {
+        type: {
+          type: String,
+          enum: ["Police", "Security", "Management", "Emergency"],
+        },
+        sentAt: Date,
+        reason: String,
+        status: {
+          type: String,
+          enum: ["Sent", "Acknowledged", "Resolved"],
+          default: "Sent",
+        },
+      },
+    ],
   },
   {
     timestamps: true,

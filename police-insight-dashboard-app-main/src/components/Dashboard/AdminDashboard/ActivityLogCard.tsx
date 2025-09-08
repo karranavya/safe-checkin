@@ -1,4 +1,4 @@
-// components/Dashboard/AdminDashboard/ActivityLogCard.tsx - NEW FILE
+// ActivityLogCard.tsx - FIXED VERSION
 import React from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,7 +22,7 @@ interface ActivityLog {
     name: string;
     badgeNumber: string;
     rank: string;
-  };
+  } | null; // ✅ Allow null values
   action: string;
   targetType: string;
   targetId: string;
@@ -35,6 +35,25 @@ interface ActivityLogCardProps {
   activity: ActivityLog;
   actionColor: string;
 }
+
+// ✅ Add getSeverityBadge helper function
+const getSeverityBadge = (details: any) => {
+  if (details?.severity) {
+    const severityColors = {
+      low: "bg-green-100 text-green-800",
+      medium: "bg-yellow-100 text-yellow-800",
+      high: "bg-orange-100 text-orange-800",
+      critical: "bg-red-100 text-red-800",
+    };
+
+    return (
+      <Badge className={`text-xs ${severityColors[details.severity]}`}>
+        {details.severity.toUpperCase()}
+      </Badge>
+    );
+  }
+  return null;
+};
 
 export const ActivityLogCard: React.FC<ActivityLogCardProps> = ({
   activity,
@@ -92,14 +111,41 @@ export const ActivityLogCard: React.FC<ActivityLogCardProps> = ({
       case_closed: "closed a case",
       report_generated: "generated a report",
       report_viewed: "viewed a report",
+      guest_checked:
+        details?.action === "check_in"
+          ? "checked in a guest"
+          : "checked out a guest",
+      guest_flagged: "flagged a guest as suspicious",
       profile_updated: "updated profile information",
       login_attempt: details?.success
         ? "logged in successfully"
         : "failed login attempt",
       logout: "logged out",
+      password_changed: "changed password",
+      role_updated: "updated user role",
+      status_changed: "changed user status",
+      test_activity: "performed a test activity",
     };
     return descriptions[action] || `performed ${action.replace(/_/g, " ")}`;
   };
+
+  // ✅ SAFE HANDLING: Get performer info with null checks
+  const getPerformerInfo = () => {
+    if (!activity.performedBy) {
+      return {
+        name: "Unknown User",
+        rank: "Unknown",
+        badgeNumber: "N/A",
+      };
+    }
+    return {
+      name: activity.performedBy.name || "Unknown User",
+      rank: activity.performedBy.rank || "Unknown",
+      badgeNumber: activity.performedBy.badgeNumber || "N/A",
+    };
+  };
+
+  const performerInfo = getPerformerInfo();
 
   return (
     <div className="flex items-start space-x-4 p-4 border rounded-lg hover:bg-muted/50 transition-colors">
@@ -112,14 +158,13 @@ export const ActivityLogCard: React.FC<ActivityLogCardProps> = ({
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
-            <span className="font-medium text-sm">
-              {activity.performedBy.name}
-            </span>
+            {/* ✅ SAFE ACCESS: Use performerInfo with null checks */}
+            <span className="font-medium text-sm">{performerInfo.name}</span>
             <Badge variant="outline" className="text-xs">
-              {activity.performedBy.rank}
+              {performerInfo.rank}
             </Badge>
             <Badge variant="outline" className="text-xs">
-              #{activity.performedBy.badgeNumber}
+              #{performerInfo.badgeNumber}
             </Badge>
           </div>
           <div className="flex items-center space-x-2 text-sm text-muted-foreground">
@@ -146,6 +191,10 @@ export const ActivityLogCard: React.FC<ActivityLogCardProps> = ({
             <Badge variant="outline" className="text-xs">
               {activity.targetType.toUpperCase()}
             </Badge>
+
+            {/* ✅ Add severity badge */}
+            {getSeverityBadge(activity.details)}
+
             {activity.ipAddress && (
               <div className="flex items-center text-xs text-muted-foreground">
                 <MapPin className="h-3 w-3 mr-1" />
@@ -162,7 +211,7 @@ export const ActivityLogCard: React.FC<ActivityLogCardProps> = ({
         </div>
 
         {/* Additional Details */}
-        {activity.details && Object.keys(activity.details).length > 0 && (
+        {/* {activity.details && Object.keys(activity.details).length > 0 && (
           <div className="mt-2 p-2 bg-muted/30 rounded text-xs">
             <div className="text-muted-foreground">
               Additional details:{" "}
@@ -170,7 +219,7 @@ export const ActivityLogCard: React.FC<ActivityLogCardProps> = ({
               {JSON.stringify(activity.details).length > 100 && "..."}
             </div>
           </div>
-        )}
+        )} */}
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-// controllers/policeAuthController.js - UPDATED with role handling and activity logging
+// controllers/policeAuthController.js - UPDATED activity logging fixes
 const Police = require("../models/Police");
 const { logActivity } = require("./activityController");
 const bcrypt = require("bcryptjs");
@@ -78,13 +78,18 @@ const registerPolice = async (req, res) => {
 
     await police.save();
 
-    // Log registration activity
+    // Log registration activity - FIXED: Use string ID instead of ObjectId for performedBy
     await logActivity(
-      police._id,
+      police._id.toString(), // Convert ObjectId to string
       "profile_updated",
       "profile",
-      police._id,
-      { action: "registration", role: police.role },
+      police._id.toString(),
+      {
+        action: "registration",
+        role: police.role,
+        badgeNumber: police.badgeNumber,
+        station: police.station,
+      },
       req
     );
 
@@ -124,7 +129,7 @@ const registerPolice = async (req, res) => {
   }
 };
 
-// Login police officer with role information and activity logging
+// Login police officer with role information and activity logging - FIXED
 const loginPolice = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -144,12 +149,12 @@ const loginPolice = async (req, res) => {
     });
 
     if (!police) {
-      // Log failed login attempt
+      // Log failed login attempt - FIXED: Use dummy ObjectId for failed attempts
       await logActivity(
-        null,
+        "000000000000000000000000", // Dummy ObjectId for system/failed attempts
         "login_attempt",
         "system",
-        new Date(),
+        "000000000000000000000000",
         { success: false, email, reason: "user_not_found" },
         req
       );
@@ -164,12 +169,12 @@ const loginPolice = async (req, res) => {
     // Check password
     const isPasswordValid = await bcrypt.compare(password, police.password);
     if (!isPasswordValid) {
-      // Log failed login attempt
+      // Log failed login attempt - FIXED: Use string ID
       await logActivity(
-        police._id,
+        police._id.toString(),
         "login_attempt",
         "system",
-        police._id,
+        police._id.toString(),
         { success: false, reason: "invalid_password" },
         req
       );
@@ -187,12 +192,12 @@ const loginPolice = async (req, res) => {
       $inc: { loginCount: 1 },
     });
 
-    // Log successful login
+    // Log successful login - FIXED: Use string ID
     await logActivity(
-      police._id,
+      police._id.toString(),
       "login_attempt",
       "system",
-      police._id,
+      police._id.toString(),
       { success: true, role: police.role },
       req
     );
@@ -227,45 +232,7 @@ const loginPolice = async (req, res) => {
   }
 };
 
-// Get police profile
-const getPoliceProfile = async (req, res) => {
-  try {
-    const police = await Police.findById(req.user.policeId).select("-password");
-    if (!police) {
-      return res.status(404).json({
-        success: false,
-        error: "Police officer not found",
-      });
-    }
-
-    res.json({
-      success: true,
-      police: {
-        id: police._id,
-        badgeNumber: police.badgeNumber,
-        name: police.name,
-        email: police.email,
-        station: police.station,
-        rank: police.rank,
-        role: police.role,
-        isActive: police.isActive,
-        permissions: police.permissions,
-        createdAt: police.createdAt,
-        updatedAt: police.updatedAt,
-        lastLoginAt: police.lastLoginAt,
-        loginCount: police.loginCount,
-      },
-    });
-  } catch (error) {
-    console.error("Get police profile error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Failed to fetch police profile",
-    });
-  }
-};
-
-// Update police profile with activity logging
+// Update police profile with activity logging - FIXED
 const updatePoliceProfile = async (req, res) => {
   try {
     const { name, email, station, rank } = req.body;
@@ -302,12 +269,12 @@ const updatePoliceProfile = async (req, res) => {
       }
     ).select("-password");
 
-    // Log profile update activity
+    // Log profile update activity - FIXED: Use string ID
     await logActivity(
-      req.user.policeId,
+      req.user.policeId.toString(), // Ensure it's a string
       "profile_updated",
       "profile",
-      req.user.policeId,
+      req.user.policeId.toString(),
       {
         updatedFields: Object.keys(updateData),
         previousData: {
@@ -352,7 +319,7 @@ const updatePoliceProfile = async (req, res) => {
   }
 };
 
-// Change password with activity logging
+// Change password with activity logging - FIXED
 const changePolicePassword = async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
@@ -378,13 +345,14 @@ const changePolicePassword = async (req, res) => {
       currentPassword,
       police.password
     );
+
     if (!isCurrentPasswordValid) {
-      // Log failed password change attempt
+      // Log failed password change attempt - FIXED: Use string ID
       await logActivity(
-        req.user.policeId,
+        req.user.policeId.toString(),
         "profile_updated",
         "profile",
-        req.user.policeId,
+        req.user.policeId.toString(),
         {
           action: "password_change",
           success: false,
@@ -407,12 +375,12 @@ const changePolicePassword = async (req, res) => {
     police.password = hashedNewPassword;
     await police.save();
 
-    // Log successful password change
+    // Log successful password change - FIXED: Use string ID
     await logActivity(
-      req.user.policeId,
+      req.user.policeId.toString(),
       "profile_updated",
       "profile",
-      req.user.policeId,
+      req.user.policeId.toString(),
       { action: "password_change", success: true },
       req
     );
@@ -430,7 +398,131 @@ const changePolicePassword = async (req, res) => {
   }
 };
 
-// Refresh token
+// Logout with activity logging - FIXED
+const logoutPolice = async (req, res) => {
+  try {
+    // Log logout activity - FIXED: Use string ID
+    await logActivity(
+      req.user.policeId.toString(),
+      "logout",
+      "system",
+      req.user.policeId.toString(),
+      { timestamp: new Date() },
+      req
+    );
+
+    res.json({
+      success: true,
+      message: "Logged out successfully",
+    });
+  } catch (error) {
+    console.error("Logout error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Logout failed",
+    });
+  }
+};
+
+// Update officer status (Admin only) - FIXED
+const updateOfficerStatus = async (req, res) => {
+  try {
+    if (req.user.policeRole !== "admin_police") {
+      return res.status(403).json({
+        success: false,
+        error: "Access denied. Admin police role required.",
+      });
+    }
+
+    const { officerId } = req.params;
+    const { isActive } = req.body;
+
+    if (typeof isActive !== "boolean") {
+      return res.status(400).json({
+        success: false,
+        error: "isActive must be a boolean value",
+      });
+    }
+
+    const officer = await Police.findByIdAndUpdate(
+      officerId,
+      { isActive },
+      { new: true }
+    ).select("-password");
+
+    if (!officer) {
+      return res.status(404).json({
+        success: false,
+        error: "Officer not found",
+      });
+    }
+
+    // Log status update activity - FIXED: Use string IDs
+    await logActivity(
+      req.user.policeId.toString(),
+      "profile_updated",
+      "profile",
+      officerId.toString(),
+      {
+        action: "status_update",
+        targetOfficer: officer.name,
+        newStatus: isActive ? "active" : "inactive",
+        performedBy: req.user.name,
+      },
+      req
+    );
+
+    res.json({
+      success: true,
+      message: `Officer ${isActive ? "activated" : "deactivated"} successfully`,
+      data: officer,
+    });
+  } catch (error) {
+    console.error("Update officer status error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to update officer status",
+    });
+  }
+};
+
+// Keep all other functions unchanged...
+const getPoliceProfile = async (req, res) => {
+  try {
+    const police = await Police.findById(req.user.policeId).select("-password");
+    if (!police) {
+      return res.status(404).json({
+        success: false,
+        error: "Police officer not found",
+      });
+    }
+    res.json({
+      success: true,
+      police: {
+        id: police._id,
+        badgeNumber: police.badgeNumber,
+        name: police.name,
+        email: police.email,
+        station: police.station,
+        rank: police.rank,
+        role: police.role,
+        isActive: police.isActive,
+        permissions: police.permissions,
+        createdAt: police.createdAt,
+        updatedAt: police.updatedAt,
+        lastLoginAt: police.lastLoginAt,
+        loginCount: police.loginCount,
+      },
+    });
+  } catch (error) {
+    console.error("Get police profile error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch police profile",
+    });
+  }
+};
+
 const refreshPoliceToken = async (req, res) => {
   try {
     const police = await Police.findById(req.user.policeId);
@@ -457,7 +549,6 @@ const refreshPoliceToken = async (req, res) => {
   }
 };
 
-// Get all police officers (Admin only)
 const getAllPoliceOfficers = async (req, res) => {
   try {
     // Only admin police can access this
@@ -546,8 +637,6 @@ const getAllPoliceOfficers = async (req, res) => {
   }
 };
 
-// Get sub-police officers (Admin only)
-// In policeAuthController.js - Add this to getSubPoliceOfficers function
 const getSubPoliceOfficers = async (req, res) => {
   try {
     console.log("=== SUB-POLICE DEBUG ===");
@@ -571,6 +660,7 @@ const getSubPoliceOfficers = async (req, res) => {
     if (isActive !== null && isActive !== undefined) {
       filter.isActive = isActive === "true";
     }
+
     if (station) {
       filter.station = { $regex: station, $options: "i" };
     }
@@ -617,7 +707,6 @@ const getSubPoliceOfficers = async (req, res) => {
   }
 };
 
-// Get officer by ID (Admin only)
 const getOfficerById = async (req, res) => {
   try {
     if (req.user.policeRole !== "admin_police") {
@@ -630,6 +719,7 @@ const getOfficerById = async (req, res) => {
     const { officerId } = req.params;
 
     const officer = await Police.findById(officerId).select("-password");
+
     if (!officer) {
       return res.status(404).json({
         success: false,
@@ -646,94 +736,6 @@ const getOfficerById = async (req, res) => {
     res.status(500).json({
       success: false,
       error: "Failed to fetch officer details",
-    });
-  }
-};
-
-// Update officer status (Admin only)
-const updateOfficerStatus = async (req, res) => {
-  try {
-    if (req.user.policeRole !== "admin_police") {
-      return res.status(403).json({
-        success: false,
-        error: "Access denied. Admin police role required.",
-      });
-    }
-
-    const { officerId } = req.params;
-    const { isActive } = req.body;
-
-    if (typeof isActive !== "boolean") {
-      return res.status(400).json({
-        success: false,
-        error: "isActive must be a boolean value",
-      });
-    }
-
-    const officer = await Police.findByIdAndUpdate(
-      officerId,
-      { isActive },
-      { new: true }
-    ).select("-password");
-
-    if (!officer) {
-      return res.status(404).json({
-        success: false,
-        error: "Officer not found",
-      });
-    }
-
-    // Log status update activity
-    await logActivity(
-      req.user.policeId,
-      "profile_updated",
-      "profile",
-      officerId,
-      {
-        action: "status_update",
-        targetOfficer: officer.name,
-        newStatus: isActive ? "active" : "inactive",
-        performedBy: req.user.name,
-      },
-      req
-    );
-
-    res.json({
-      success: true,
-      message: `Officer ${isActive ? "activated" : "deactivated"} successfully`,
-      data: officer,
-    });
-  } catch (error) {
-    console.error("Update officer status error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Failed to update officer status",
-    });
-  }
-};
-
-// Logout with activity logging
-const logoutPolice = async (req, res) => {
-  try {
-    // Log logout activity
-    await logActivity(
-      req.user.policeId,
-      "logout",
-      "system",
-      req.user.policeId,
-      { timestamp: new Date() },
-      req
-    );
-
-    res.json({
-      success: true,
-      message: "Logged out successfully",
-    });
-  } catch (error) {
-    console.error("Logout error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Logout failed",
     });
   }
 };

@@ -237,23 +237,27 @@ export default function SuspectsPage() {
     notes?: string
   ) => {
     try {
-      const token = localStorage.getItem("policeToken");
-      if (!token) return;
-
-      const response = await fetch(`/api/police/alerts/${alertId}/status`, {
-        method: "PUT",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ status, notes }),
-      });
+      const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:5000";
+      const response = await fetch(
+        `${apiUrl}/api/police/alerts/${alertId}/status`,
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ status, notes }),
+        }
+      );
 
       if (response.ok) {
         fetchAlerts(); // Refresh alerts
         if (selectedAlert && selectedAlert.id === alertId) {
           setSelectedAlert((prev) => ({ ...prev, status }));
         }
+
+        // Activity logging is now handled automatically by backend
+        console.log(`Alert ${alertId} status updated to ${status}`);
       }
     } catch (error) {
       console.error("Failed to update alert status:", error);

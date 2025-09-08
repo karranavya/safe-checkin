@@ -1,13 +1,14 @@
-// routes/policeAlertRoutes.js
+// routes/policeAlertRoutes.js - UPDATED with activity logging
 const express = require("express");
 const router = express.Router();
 const { authenticatePolice } = require("../middleware/policeAuth");
+const { logActivity } = require("../controllers/activityController");
 const Alert = require("../models/Alert");
 
 // All police alert routes require police authentication
 router.use(authenticatePolice);
 
-// Get all alerts for police dashboard
+// Get all alerts for police dashboard with activity logging
 router.get("/", async (req, res) => {
   try {
     const {
@@ -55,8 +56,6 @@ router.get("/", async (req, res) => {
     // Sorting
     const sort = {};
     if (sortBy === "priority") {
-      // Custom priority sorting: Critical > High > Medium > Low
-      const priorityOrder = { Critical: 4, High: 3, Medium: 2, Low: 1 };
       sort.priority = sortOrder === "asc" ? 1 : -1;
       sort.createdAt = -1;
     } else {
@@ -75,6 +74,22 @@ router.get("/", async (req, res) => {
         .limit(parseInt(limit)),
       Alert.countDocuments(query),
     ]);
+
+    // Log police alert viewing activity
+    await logActivity(
+      req.user.policeId.toString(),
+      "alert_viewed",
+      "alert",
+      "police_dashboard",
+      {
+        viewType: "dashboard",
+        filters: { status, priority, type, search },
+        resultCount: alerts.length,
+        totalCount,
+        page: parseInt(page),
+      },
+      req
+    );
 
     res.json({
       success: true,
@@ -128,7 +143,112 @@ router.get("/", async (req, res) => {
   }
 });
 
-// Get alert details by ID
+// Update alert status with enhanced activity logging
+router.put("/:id/status", async (req, res) => {
+  try {
+    const { status, notes } = req.body;
+
+    if (!status) {
+      return res.status(400).json({
+        success: false,
+        error: "Status is required",
+      });
+    }
+
+    const validStatuses = [
+      "Pending",
+      "Acknowledged",
+      "In Progress",
+      "Resolved",
+      "Cancelled",
+    ];
+
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid status",
+        validStatuses,
+      });
+    }
+
+    const alert = await Alert.findById(req.params.id);
+
+    if (!alert) {
+      return res.status(404).json({
+        success: false,
+        error: "Alert not found",
+      });
+    }
+
+    const previousStatus = alert.status;
+
+    // Update status
+    alert.status = status;
+
+    // Add timeline entry
+    alert.timeline.push({
+      action: status,
+      performedBy: {
+        name: req.user.name,
+        role: `Police Officer - ${req.user.rank}`,
+      },
+      timestamp: new Date(),
+      notes: notes || `Status changed to ${status} by police`,
+    });
+
+    // Handle resolution by police
+    if (status === "Resolved") {
+      alert.resolution = {
+        summary: notes || "Resolved by police department",
+        resolvedBy: {
+          name: req.user.name,
+          role: `Police Officer - ${req.user.rank}`,
+        },
+        resolvedAt: new Date(),
+        actionsTaken: ["Police intervention"],
+      };
+    }
+
+    await alert.save();
+
+    // Log police alert status update
+    await logActivity(
+      req.user.policeId.toString(),
+      "alert_updated",
+      "alert",
+      alert._id.toString(),
+      {
+        alertTitle: alert.title,
+        previousStatus,
+        newStatus: status,
+        notes,
+        updatedBy: req.user.name,
+        policeAction: true,
+      },
+      req
+    );
+
+    res.json({
+      success: true,
+      message: `Alert status updated to ${status}`,
+      alert: {
+        id: alert._id,
+        title: alert.title,
+        status: alert.status,
+        updatedAt: alert.updatedAt,
+        resolution: alert.resolution,
+      },
+    });
+  } catch (error) {
+    console.error("Update police alert status error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to update alert status",
+    });
+  }
+});
+
+// Keep other routes unchanged...
 router.get("/:id", async (req, res) => {
   try {
     const alert = await Alert.findById(req.params.id)
@@ -141,6 +261,22 @@ router.get("/:id", async (req, res) => {
         error: "Alert not found",
       });
     }
+
+    // Log detailed alert viewing
+    await logActivity(
+      req.user.policeId.toString(),
+      "alert_viewed",
+      "alert",
+      alert._id.toString(),
+      {
+        alertTitle: alert.title,
+        alertType: alert.type,
+        priority: alert.priority,
+        hotelName: alert.hotelId?.name,
+        viewType: "detailed",
+      },
+      req
+    );
 
     res.json({
       success: true,
@@ -194,92 +330,6 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-// Update alert status (police can acknowledge/update alerts)
-router.put("/:id/status", async (req, res) => {
-  try {
-    const { status, notes } = req.body;
-
-    if (!status) {
-      return res.status(400).json({
-        success: false,
-        error: "Status is required",
-      });
-    }
-
-    const validStatuses = [
-      "Pending",
-      "Acknowledged",
-      "In Progress",
-      "Resolved",
-      "Cancelled",
-    ];
-    if (!validStatuses.includes(status)) {
-      return res.status(400).json({
-        success: false,
-        error: "Invalid status",
-        validStatuses,
-      });
-    }
-
-    const alert = await Alert.findById(req.params.id);
-
-    if (!alert) {
-      return res.status(404).json({
-        success: false,
-        error: "Alert not found",
-      });
-    }
-
-    // Update status
-    alert.status = status;
-
-    // Add timeline entry
-    alert.timeline.push({
-      action: status,
-      performedBy: {
-        name: req.user.name,
-        role: `Police Officer - ${req.user.rank}`,
-      },
-      timestamp: new Date(),
-      notes: notes || `Status changed to ${status} by police`,
-    });
-
-    // Handle resolution by police
-    if (status === "Resolved") {
-      alert.resolution = {
-        summary: notes || "Resolved by police department",
-        resolvedBy: {
-          name: req.user.name,
-          role: `Police Officer - ${req.user.rank}`,
-        },
-        resolvedAt: new Date(),
-        actionsTaken: ["Police intervention"],
-      };
-    }
-
-    await alert.save();
-
-    res.json({
-      success: true,
-      message: `Alert status updated to ${status}`,
-      alert: {
-        id: alert._id,
-        title: alert.title,
-        status: alert.status,
-        updatedAt: alert.updatedAt,
-        resolution: alert.resolution,
-      },
-    });
-  } catch (error) {
-    console.error("Update police alert status error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Failed to update alert status",
-    });
-  }
-});
-
-// Get police-specific alert statistics
 router.get("/stats/summary", async (req, res) => {
   try {
     const { period = "30" } = req.query;
@@ -308,6 +358,21 @@ router.get("/stats/summary", async (req, res) => {
         { $group: { _id: "$type", count: { $sum: 1 } } },
       ]),
     ]);
+
+    // Log police statistics viewing
+    await logActivity(
+      req.user.policeId.toString(),
+      "report_viewed",
+      "report",
+      `police_alert_stats_${period}`,
+      {
+        reportType: "police_alert_statistics",
+        period,
+        totalAlerts,
+        activeAlerts,
+      },
+      req
+    );
 
     res.json({
       success: true,

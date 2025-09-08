@@ -35,11 +35,36 @@ export const AdminReports = () => {
   const generateReport = async (type: string) => {
     setIsGenerating(true);
     try {
-      // Simulate report generation
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:5000";
+      const token =
+        localStorage.getItem("policeToken") ||
+        sessionStorage.getItem("policeToken");
 
-      // Here you would actually call your API to generate the report
-      console.log(`Generating ${type} report for ${timeRange} days`);
+      const response = await fetch(`${apiUrl}/api/reports/custom`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          reportType: type,
+          dateRange: {
+            start: new Date(
+              Date.now() - parseInt(timeRange) * 24 * 60 * 60 * 1000
+            ).toISOString(),
+            end: new Date().toISOString(),
+          },
+          format: "json",
+        }),
+      });
+
+      if (response.ok) {
+        const reportData = await response.json();
+        console.log(`${type} report generated:`, reportData);
+
+        // Handle the report data (download, display, etc.)
+        // The backend automatically logs 'report_generated' activity
+      }
     } catch (error) {
       console.error("Report generation failed:", error);
     } finally {

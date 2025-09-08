@@ -1,8 +1,10 @@
-// controllers/hotelAuthController.js
+// controllers/hotelAuthController.js - UPDATED with activity logging
 const Hotel = require("../models/Hotel");
+const { logActivity } = require("./activityController");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
+
 // Generate JWT token
 const generateToken = (hotelId) => {
   return jwt.sign({ hotelId }, process.env.JWT_SECRET, {
@@ -10,7 +12,7 @@ const generateToken = (hotelId) => {
   });
 };
 
-// Register new hotel
+// Register new hotel - UPDATED with activity logging
 const registerHotel = async (req, res) => {
   try {
     const {
@@ -131,6 +133,32 @@ const registerHotel = async (req, res) => {
 
     await hotel.save();
 
+    // Log activity if registered by police
+    if (actualPoliceOfficerId) {
+      try {
+        await logActivity(
+          actualPoliceOfficerId,
+          "hotel_registered",
+          "hotel",
+          hotel._id,
+          {
+            hotelName: hotel.name,
+            ownerName: hotel.ownerName,
+            location: hotel.address,
+            numberOfRooms: hotel.numberOfRooms,
+            registeredBy: policeOfficerData?.name || "Police Officer",
+            registrationMethod: "police_portal", // Add method tracking
+          },
+          req
+        );
+        console.log(
+          `✅ Activity logged: hotel_registered by ${policeOfficerData?.name}`
+        );
+      } catch (logError) {
+        console.error("❌ Failed to log activity:", logError);
+        // Don't fail the main operation if logging fails
+      }
+    }
     const token = generateToken(hotel._id);
 
     res.status(201).json({
@@ -168,7 +196,117 @@ const registerHotel = async (req, res) => {
   }
 };
 
-// Login hotel
+// Update hotel profile - UPDATED with activity logging
+const updateHotelProfile = async (req, res) => {
+  try {
+    const {
+      name,
+      phone,
+      ownerName,
+      numberOfRooms,
+      roomRate,
+      address,
+      settings,
+    } = req.body;
+
+    // Get current hotel data for logging
+    const currentHotel = await Hotel.findById(req.hotelId);
+    if (!currentHotel) {
+      return res.status(404).json({ error: "Hotel not found" });
+    }
+
+    const updateData = {};
+    const updatedFields = [];
+
+    if (name && name !== currentHotel.name) {
+      updateData.name = name.trim();
+      updatedFields.push("name");
+    }
+    if (phone && phone !== currentHotel.phone) {
+      updateData.phone = phone.trim();
+      updatedFields.push("phone");
+    }
+    if (ownerName && ownerName !== currentHotel.ownerName) {
+      updateData.ownerName = ownerName.trim();
+      updatedFields.push("ownerName");
+    }
+    if (numberOfRooms && numberOfRooms !== currentHotel.numberOfRooms) {
+      updateData.numberOfRooms = parseInt(numberOfRooms);
+      updatedFields.push("numberOfRooms");
+    }
+    if (roomRate && roomRate !== currentHotel.roomRate) {
+      updateData.roomRate = parseFloat(roomRate);
+      updatedFields.push("roomRate");
+    }
+    if (address) {
+      updateData.address = address;
+      updatedFields.push("address");
+    }
+    if (settings) {
+      updateData.settings = { ...currentHotel.settings, ...settings };
+      updatedFields.push("settings");
+    }
+
+    const hotel = await Hotel.findByIdAndUpdate(req.hotelId, updateData, {
+      new: true,
+      runValidators: true,
+    });
+
+    // Log activity if there were actual updates
+    if (updatedFields.length > 0) {
+      await logActivity(
+        req.user?.policeId || "hotel_staff",
+        "hotel_updated",
+        "hotel",
+        hotel._id,
+        {
+          hotelName: hotel.name,
+          updatedFields,
+          previousData: {
+            name: currentHotel.name,
+            phone: currentHotel.phone,
+            ownerName: currentHotel.ownerName,
+            numberOfRooms: currentHotel.numberOfRooms,
+            roomRate: currentHotel.roomRate,
+          },
+          newData: updateData,
+        },
+        req
+      );
+    }
+
+    res.json({
+      message: "Profile updated successfully",
+      hotel: {
+        id: hotel._id,
+        name: hotel.name,
+        email: hotel.email,
+        ownerName: hotel.ownerName,
+        phone: hotel.phone,
+        numberOfRooms: hotel.numberOfRooms,
+        roomRate: hotel.roomRate,
+        address: hotel.address,
+        settings: hotel.settings,
+      },
+    });
+  } catch (error) {
+    console.error("Update hotel profile error:", error);
+
+    if (error.name === "ValidationError") {
+      const messages = Object.values(error.errors).map((err) => err.message);
+      return res.status(400).json({
+        error: "Validation failed",
+        details: messages,
+      });
+    }
+
+    res.status(500).json({
+      error: "Failed to update profile",
+    });
+  }
+};
+
+// Rest of the functions remain the same...
 const loginHotel = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -233,7 +371,90 @@ const loginHotel = async (req, res) => {
   }
 };
 
-// Get hotel profile
+// Add hotel verification function for police
+const verifyHotel = async (req, res) => {
+  try {
+    // Only police can verify hotels
+    if (!req.user || !req.user.policeId) {
+      return res.status(403).json({
+        error: "Only police officers can verify hotels",
+      });
+    }
+
+    const { hotelId } = req.params;
+    const { verificationNotes } = req.body;
+
+    const hotel = await Hotel.findById(hotelId);
+    if (!hotel) {
+      return res.status(404).json({
+        error: "Hotel not found",
+      });
+    }
+
+    if (hotel.isVerified) {
+      return res.status(400).json({
+        error: "Hotel is already verified",
+      });
+    }
+    const previousState = {
+      isVerified: hotel.isVerified,
+      verifiedBy: hotel.verifiedBy,
+      verifiedAt: hotel.verifiedAt,
+    };
+    // Update hotel verification status
+    hotel.isVerified = true;
+    hotel.verifiedBy = req.user.policeId;
+    hotel.verifiedAt = new Date();
+    hotel.verificationNotes = verificationNotes;
+
+    await hotel.save();
+
+    // Log the verification activity
+    try {
+      await logActivity(
+        req.user.policeId,
+        "hotel_verified",
+        "hotel",
+        hotel._id,
+        {
+          hotelName: hotel.name,
+          ownerName: hotel.ownerName,
+          verifiedBy: req.user.name,
+          verificationNotes: verificationNotes || "Hotel verified by police",
+          previousState,
+          newState: {
+            isVerified: true,
+            verifiedAt: hotel.verifiedAt,
+          },
+        },
+        req
+      );
+      console.log(
+        `✅ Hotel verification logged: ${hotel.name} verified by ${req.user.name}`
+      );
+    } catch (logError) {
+      console.error("❌ Failed to log verification activity:", logError);
+    }
+
+    res.json({
+      message: "Hotel verified successfully",
+      hotel: {
+        id: hotel._id,
+        name: hotel.name,
+        isVerified: hotel.isVerified,
+        verifiedAt: hotel.verifiedAt,
+        verificationNotes: hotel.verificationNotes,
+      },
+    });
+  } catch (error) {
+    console.error("Hotel verification error:", error);
+    res.status(500).json({
+      error: "Failed to verify hotel",
+    });
+  }
+};
+
+// Keep all other existing functions unchanged...
 const getHotelProfile = async (req, res) => {
   try {
     const hotel = await Hotel.findById(req.hotelId)
@@ -271,66 +492,6 @@ const getHotelProfile = async (req, res) => {
   }
 };
 
-// Update hotel profile
-const updateHotelProfile = async (req, res) => {
-  try {
-    const {
-      name,
-      phone,
-      ownerName,
-      numberOfRooms,
-      roomRate,
-      address,
-      settings,
-    } = req.body;
-
-    const updateData = {};
-
-    if (name) updateData.name = name.trim();
-    if (phone) updateData.phone = phone.trim();
-    if (ownerName) updateData.ownerName = ownerName.trim();
-    if (numberOfRooms) updateData.numberOfRooms = parseInt(numberOfRooms);
-    if (roomRate) updateData.roomRate = parseFloat(roomRate);
-    if (address) updateData.address = address;
-    if (settings) updateData.settings = { ...req.hotel.settings, ...settings };
-
-    const hotel = await Hotel.findByIdAndUpdate(req.hotelId, updateData, {
-      new: true,
-      runValidators: true,
-    });
-
-    res.json({
-      message: "Profile updated successfully",
-      hotel: {
-        id: hotel._id,
-        name: hotel.name,
-        email: hotel.email,
-        ownerName: hotel.ownerName,
-        phone: hotel.phone,
-        numberOfRooms: hotel.numberOfRooms,
-        roomRate: hotel.roomRate,
-        address: hotel.address,
-        settings: hotel.settings,
-      },
-    });
-  } catch (error) {
-    console.error("Update hotel profile error:", error);
-
-    if (error.name === "ValidationError") {
-      const messages = Object.values(error.errors).map((err) => err.message);
-      return res.status(400).json({
-        error: "Validation failed",
-        details: messages,
-      });
-    }
-
-    res.status(500).json({
-      error: "Failed to update profile",
-    });
-  }
-};
-
-// Change password
 const changePassword = async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
@@ -379,7 +540,6 @@ const changePassword = async (req, res) => {
   }
 };
 
-// Refresh token
 const refreshToken = async (req, res) => {
   try {
     const hotel = await Hotel.findById(req.hotelId);
@@ -404,12 +564,8 @@ const refreshToken = async (req, res) => {
   }
 };
 
-// Logout (optional - mainly for clearing server-side sessions if implemented)
 const logoutHotel = async (req, res) => {
   try {
-    // For JWT tokens, logout is typically handled client-side
-    // But we can log the logout event or invalidate refresh tokens if implemented
-
     res.json({
       message: "Logged out successfully",
     });
@@ -421,7 +577,6 @@ const logoutHotel = async (req, res) => {
   }
 };
 
-// Get hotel statistics
 const getHotelStats = async (req, res) => {
   try {
     const Guest = require("../models/Guest");
@@ -479,6 +634,7 @@ const getHotelStats = async (req, res) => {
     });
   }
 };
+
 const getAllHotels = async (req, res) => {
   try {
     // Get query parameters for filtering and pagination
@@ -552,7 +708,6 @@ const getAllHotels = async (req, res) => {
   }
 };
 
-// Add this to your exports
 module.exports = {
   registerHotel,
   loginHotel,
@@ -562,5 +717,6 @@ module.exports = {
   refreshToken,
   logoutHotel,
   getHotelStats,
-  getAllHotels, // Add this new function
+  getAllHotels,
+  verifyHotel, // Add the new verification function
 };

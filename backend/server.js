@@ -1,8 +1,13 @@
-// server.js — v2.1.0 (Fixed)
+// server.js - ENHANCED VERSION with better middleware
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const dotenv = require("dotenv");
+const {
+  securityHeaders,
+  sanitizeInput,
+  apiRateLimit,
+} = require("./middleware/security");
 
 // Route imports
 const hotelRoutes = require("./routes/hotelRoutes");
@@ -12,13 +17,18 @@ const reportRoutes = require("./routes/reportRoutes");
 const policeRoutes = require("./routes/policeRoutes");
 const policeAlertRoutes = require("./routes/policeAlertRoutes");
 const activityRoutes = require("./routes/activityRoutes");
+
 // Load environment variables
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-/* ─────────────────────────────  MIDDLEWARE  ───────────────────────────── */
+/* ─────────────────────────────  SECURITY MIDDLEWARE  ───────────────────────────── */
+app.use(securityHeaders);
+app.use(sanitizeInput);
+
+/* ─────────────────────────────  CORS & BASIC MIDDLEWARE  ───────────────────────────── */
 app.use(
   cors({
     origin: [
@@ -28,24 +38,43 @@ app.use(
       "http://localhost:8082",
     ],
     credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
 
-// Add request logging middleware for debugging
+// Enhanced request logging
 app.use((req, res, next) => {
-  console.log(`${req.method} ${req.path} - ${new Date().toISOString()}`);
+  const timestamp = new Date().toISOString();
+  const userAgent = req.get("User-Agent") || "Unknown";
+  const ip = req.ip || req.connection.remoteAddress;
+
+  console.log(
+    `[${timestamp}] ${req.method} ${
+      req.path
+    } - IP: ${ip} - UA: ${userAgent.substring(0, 50)}`
+  );
   next();
 });
 
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
+// Apply rate limiting to API routes
+app.use("/api", apiRateLimit);
+
 /* ───────────────────────────  DATABASE SET-UP  ────────────────────────── */
 const MONGODB_URI =
   process.env.MONGODB_URI || "mongodb://localhost:27017/safecheckin";
 
 mongoose
-  .connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+  .connect(MONGODB_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+    maxPoolSize: 10, // Maintain up to 10 socket connections
+    serverSelectionTimeoutMS: 5000, // Keep trying to send operations for 5 seconds
+    socketTimeoutMS: 45000, // Close sockets after 45 seconds of inactivity
+  })
   .then(() => console.log("✅ Connected to MongoDB successfully"))
   .catch((error) => {
     console.error("❌ MongoDB connection error:", error);
@@ -53,12 +82,13 @@ mongoose
   });
 
 /* ──────────────────────────────  ROUTES  ─────────────────────────────── */
-// Root route - MUST return JSON
+// Health check route
 app.get("/", (_req, res) => {
   res.json({
     message: "SafeCheckIn Multi-Hotel API is running!",
-    version: "2.1.0",
+    version: "2.2.0",
     timestamp: new Date().toISOString(),
+    status: "healthy",
     availableRoutes: [
       "/api/hotels",
       "/api/guests",
@@ -70,7 +100,7 @@ app.get("/", (_req, res) => {
   });
 });
 
-// API Routes
+// API Routes with enhanced logging
 app.use("/api/hotels", hotelRoutes);
 app.use("/api/guests", guestRoutes);
 app.use("/api/alerts", alertRoutes);
@@ -79,19 +109,20 @@ app.use("/api/police", policeRoutes);
 app.use("/api/police/alerts", policeAlertRoutes);
 app.use("/api/activities", activityRoutes);
 
-/* ───────────────────────  404 HANDLER - JSON ONLY  ───────────────────────────── */
+/* ───────────────────────  ERROR HANDLERS  ───────────────────────────── */
+// 404 handler
 app.use((req, res) => {
-  console.log(`404 - Route not found: ${req.method} ${req.originalUrl}`);
+  console.log(`❌ 404 - Route not found: ${req.method} ${req.originalUrl}`);
   res.status(404).json({
     success: false,
     error: "Route not found",
     path: req.originalUrl,
     method: req.method,
-    message: `The route ${req.method} ${req.originalUrl} does not exist`,
+    timestamp: new Date().toISOString(),
   });
 });
 
-/* ─────────────────────────  GLOBAL ERROR HANDLER - JSON ONLY  ─────────────────────── */
+// Global error handler
 app.use((error, req, res, next) => {
   console.error("❌ Server Error:", {
     path: req.originalUrl,
@@ -100,10 +131,9 @@ app.use((error, req, res, next) => {
     stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
   });
 
-  // Ensure we always return JSON
   res.setHeader("Content-Type", "application/json");
 
-  // Duplicate key error
+  // Handle specific error types
   if (error.code === 11000) {
     const field = Object.keys(error.keyValue)[0];
     return res.status(400).json({
@@ -113,7 +143,6 @@ app.use((error, req, res, next) => {
     });
   }
 
-  // Validation error
   if (error.name === "ValidationError") {
     const messages = Object.values(error.errors).map((err) => err.message);
     return res.status(400).json({
@@ -123,7 +152,6 @@ app.use((error, req, res, next) => {
     });
   }
 
-  // JWT error
   if (error.name === "JsonWebTokenError") {
     return res.status(401).json({
       success: false,
@@ -132,7 +160,6 @@ app.use((error, req, res, next) => {
     });
   }
 
-  // JWT expired error
   if (error.name === "TokenExpiredError") {
     return res.status(401).json({
       success: false,
@@ -150,30 +177,26 @@ app.use((error, req, res, next) => {
         ? error.message
         : "Something went wrong",
     code: "INTERNAL_ERROR",
+    timestamp: new Date().toISOString(),
   });
 });
 
-/* ───────────────────────  GRACEFUL SHUT-DOWN  ─────────────────────────── */
-process.on("SIGTERM", () => {
-  console.log("👋 SIGTERM received, shutting down gracefully");
+/* ───────────────────────  GRACEFUL SHUTDOWN  ─────────────────────────── */
+const gracefulShutdown = (signal) => {
+  console.log(`👋 ${signal} received, shutting down gracefully`);
   mongoose.connection.close(() => {
     console.log("📦 MongoDB connection closed");
     process.exit(0);
   });
-});
+};
 
-process.on("SIGINT", () => {
-  console.log("👋 SIGINT received, shutting down gracefully");
-  mongoose.connection.close(() => {
-    console.log("📦 MongoDB connection closed");
-    process.exit(0);
-  });
-});
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
 /* ───────────────────────────────  LISTEN  ─────────────────────────────── */
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
   console.log(`📊 Environment: ${process.env.NODE_ENV || "development"}`);
-  // console.log(`📋 Available routes:`);
-  // console.log(`   GET  / (API info)`);
+  console.log(`🔒 Security headers enabled`);
+  console.log(`⏱️  Rate limiting active`);
 });

@@ -12,6 +12,10 @@ const logActivity = async (
   req = null
 ) => {
   try {
+    if (!performedBy || !action || !targetType || !targetId) {
+      console.error("❌ Activity logging failed: Missing required parameters");
+      return null;
+    }
     const activityData = {
       performedBy,
       action,
@@ -37,7 +41,26 @@ const logActivity = async (
     return activity;
   } catch (error) {
     console.error("Activity logging error:", error);
+
     // Don't throw error to prevent breaking main functionality
+    try {
+      await ActivityLog.create({
+        performedBy: performedBy || "system",
+        action: "logging_failed",
+        targetType: "system",
+        targetId: "system",
+        details: {
+          originalAction: action,
+          error: error.message,
+          targetType,
+          targetId,
+        },
+        status: "failed",
+        severity: "high",
+      });
+    } catch (fallbackError) {
+      console.error("❌ Even fallback logging failed:", fallbackError);
+    }
     return null;
   }
 };
@@ -54,6 +77,7 @@ const getActivityLogs = async (req, res) => {
       });
     }
 
+    // ✅ FIX: Properly destructure severity with default value
     const {
       page = 1,
       limit = 20,
@@ -63,6 +87,7 @@ const getActivityLogs = async (req, res) => {
       startDate,
       endDate,
       status = "success",
+      severity = null, // Add this line with default null
     } = req.query;
 
     // Build filter object
@@ -71,6 +96,9 @@ const getActivityLogs = async (req, res) => {
     if (action) filter.action = action;
     if (targetType) filter.targetType = targetType;
     if (status) filter.status = status;
+
+    // ✅ FIX: Safely check if severity exists before adding to filter
+    if (severity) filter.severity = severity;
 
     // Date range filter
     if (startDate || endDate) {
@@ -112,6 +140,7 @@ const getActivityLogs = async (req, res) => {
           startDate,
           endDate,
           status,
+          severity, // Now safely included
         },
       },
     });
@@ -338,7 +367,34 @@ const getMyActivities = async (req, res) => {
     });
   }
 };
+const determineSeverity = (action) => {
+  const severityMap = {
+    // Critical actions
+    hotel_deleted: "critical",
+    suspect_deleted: "critical",
+    case_closed: "critical",
 
+    // High importance
+    hotel_registered: "high",
+    hotel_verified: "high",
+    suspect_added: "high",
+    alert_created: "high",
+
+    // Medium importance
+    hotel_updated: "medium",
+    suspect_updated: "medium",
+    alert_updated: "medium",
+    report_generated: "medium",
+
+    // Low importance
+    profile_updated: "low",
+    login_attempt: "low",
+    logout: "low",
+    report_viewed: "low",
+  };
+
+  return severityMap[action] || "medium";
+};
 module.exports = {
   logActivity,
   getActivityLogs,
