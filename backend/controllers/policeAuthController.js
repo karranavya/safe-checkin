@@ -1,8 +1,10 @@
-// controllers/policeAuthController.js - UPDATED activity logging fixes
+// controllers/policeAuthController.js - ENHANCED WITH ACTIVITY COUNTS
 const Police = require("../models/Police");
+const ActivityLog = require("../models/ActivityLog");
 const { logActivity } = require("./activityController");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const mongoose = require("mongoose");
 
 // Generate JWT token with role information
 const generatePoliceToken = (policeId, police) => {
@@ -78,9 +80,9 @@ const registerPolice = async (req, res) => {
 
     await police.save();
 
-    // Log registration activity - FIXED: Use string ID instead of ObjectId for performedBy
+    // Log registration activity
     await logActivity(
-      police._id.toString(), // Convert ObjectId to string
+      police._id.toString(),
       "profile_updated",
       "profile",
       police._id.toString(),
@@ -129,7 +131,7 @@ const registerPolice = async (req, res) => {
   }
 };
 
-// Login police officer with role information and activity logging - FIXED
+// Login police officer with role information and activity logging
 const loginPolice = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -149,9 +151,9 @@ const loginPolice = async (req, res) => {
     });
 
     if (!police) {
-      // Log failed login attempt - FIXED: Use dummy ObjectId for failed attempts
+      // Log failed login attempt
       await logActivity(
-        "000000000000000000000000", // Dummy ObjectId for system/failed attempts
+        new mongoose.Types.ObjectId().toString(),
         "login_attempt",
         "system",
         "000000000000000000000000",
@@ -169,7 +171,7 @@ const loginPolice = async (req, res) => {
     // Check password
     const isPasswordValid = await bcrypt.compare(password, police.password);
     if (!isPasswordValid) {
-      // Log failed login attempt - FIXED: Use string ID
+      // Log failed login attempt
       await logActivity(
         police._id.toString(),
         "login_attempt",
@@ -192,7 +194,7 @@ const loginPolice = async (req, res) => {
       $inc: { loginCount: 1 },
     });
 
-    // Log successful login - FIXED: Use string ID
+    // Log successful login
     await logActivity(
       police._id.toString(),
       "login_attempt",
@@ -232,7 +234,333 @@ const loginPolice = async (req, res) => {
   }
 };
 
-// Update police profile with activity logging - FIXED
+// Enhanced getSubPoliceOfficers with activity counts
+const getSubPoliceOfficers = async (req, res) => {
+  try {
+    console.log("=== SUB-POLICE DEBUG ===");
+    console.log("User role:", req.user.policeRole);
+    console.log("Query params:", req.query);
+
+    // Only admin police can access this
+    if (req.user.policeRole !== "admin_police") {
+      return res.status(403).json({
+        success: false,
+        error: "Access denied. Admin police role required.",
+      });
+    }
+
+    const { page = 1, limit = 10, isActive = null, station = null } = req.query;
+
+    const filter = {
+      role: "sub_police",
+    };
+
+    if (isActive !== null && isActive !== undefined) {
+      filter.isActive = isActive === "true";
+    }
+
+    if (station) {
+      filter.station = { $regex: station, $options: "i" };
+    }
+
+    console.log("Filter being used:", filter);
+
+    const skip = (page - 1) * limit;
+
+    // Use aggregation to get activity counts with police data [web:64][web:65]
+    const subPoliceWithActivities = await Police.aggregate([
+      { $match: filter },
+      {
+        $lookup: {
+          from: "activitylogs", // Collection name for ActivityLog
+          localField: "_id",
+          foreignField: "performedBy",
+          as: "activities",
+        },
+      },
+      {
+        $addFields: {
+          totalActivities: { $size: "$activities" },
+          // Get recent activities count (last 30 days)
+          recentActivities: {
+            $size: {
+              $filter: {
+                input: "$activities",
+                cond: {
+                  $gte: [
+                    "$$this.createdAt",
+                    { $subtract: [new Date(), 30 * 24 * 60 * 60 * 1000] },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      },
+      {
+        $project: {
+          activities: 0, // Remove activities array to reduce payload size
+          password: 0, // Remove password field
+        },
+      },
+      { $sort: { createdAt: -1 } },
+      { $skip: skip },
+      { $limit: parseInt(limit) },
+    ]);
+
+    // Get total count for pagination [web:56][web:67]
+    const totalCount = await Police.countDocuments(filter);
+
+    console.log("Found sub-police count:", totalCount);
+    console.log(
+      "Sub-police officers with activities:",
+      subPoliceWithActivities.length
+    );
+
+    const totalPages = Math.ceil(totalCount / limit);
+
+    res.json({
+      success: true,
+      data: {
+        officers: subPoliceWithActivities,
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages,
+          totalCount,
+          hasNextPage: page < totalPages,
+          hasPrevPage: page > 1,
+          limit: parseInt(limit),
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Get sub-police officers error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch sub-police officers",
+      message: error.message,
+    });
+  }
+};
+
+// Enhanced getAllPoliceOfficers with activity counts
+const getAllPoliceOfficers = async (req, res) => {
+  try {
+    // Only admin police can access this
+    if (req.user.policeRole !== "admin_police") {
+      return res.status(403).json({
+        success: false,
+        error: "Access denied. Admin police role required.",
+      });
+    }
+
+    const {
+      page = 1,
+      limit = 10,
+      search = "",
+      isActive = null,
+      station = null,
+      role = null,
+    } = req.query;
+
+    // Build filter object
+    const filter = {};
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: "i" } },
+        { email: { $regex: search, $options: "i" } },
+        { badgeNumber: { $regex: search, $options: "i" } },
+        { station: { $regex: search, $options: "i" } },
+      ];
+    }
+    if (isActive !== null) {
+      filter.isActive = isActive === "true";
+    }
+    if (station) {
+      filter.station = { $regex: station, $options: "i" };
+    }
+    if (role) {
+      filter.role = role;
+    }
+
+    // Calculate pagination
+    const skip = (page - 1) * limit;
+
+    // Use aggregation to get officers with activity counts [web:64][web:65]
+    const officersWithActivities = await Police.aggregate([
+      { $match: filter },
+      {
+        $lookup: {
+          from: "activitylogs",
+          localField: "_id",
+          foreignField: "performedBy",
+          as: "activities",
+        },
+      },
+      {
+        $addFields: {
+          totalActivities: { $size: "$activities" },
+          recentActivities: {
+            $size: {
+              $filter: {
+                input: "$activities",
+                cond: {
+                  $gte: [
+                    "$$this.createdAt",
+                    { $subtract: [new Date(), 30 * 24 * 60 * 60 * 1000] },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      },
+      {
+        $project: {
+          activities: 0,
+          password: 0,
+        },
+      },
+      { $sort: { createdAt: -1 } },
+      { $skip: skip },
+      { $limit: parseInt(limit) },
+    ]);
+
+    const totalCount = await Police.countDocuments(filter);
+    const totalPages = Math.ceil(totalCount / limit);
+    const hasNextPage = page < totalPages;
+    const hasPrevPage = page > 1;
+
+    res.json({
+      success: true,
+      data: {
+        officers: officersWithActivities,
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages,
+          totalCount,
+          hasNextPage,
+          hasPrevPage,
+          limit: parseInt(limit),
+        },
+        filters: {
+          search,
+          isActive,
+          station,
+          role,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Get all police officers error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch police officers",
+      message: error.message,
+    });
+  }
+};
+
+// Enhanced getOfficerById with detailed statistics
+const getOfficerById = async (req, res) => {
+  try {
+    if (req.user.policeRole !== "admin_police") {
+      return res.status(403).json({
+        success: false,
+        error: "Access denied. Admin police role required.",
+      });
+    }
+
+    const { officerId } = req.params;
+
+    // Use aggregation to get officer with comprehensive stats [web:64][web:65]
+    const officerStats = await Police.aggregate([
+      { $match: { _id: new mongoose.Types.ObjectId(officerId) } },
+      {
+        $lookup: {
+          from: "activitylogs",
+          localField: "_id",
+          foreignField: "performedBy",
+          as: "activities",
+        },
+      },
+      {
+        $addFields: {
+          totalActivities: { $size: "$activities" },
+          // Activities in last 30 days
+          monthlyActivities: {
+            $size: {
+              $filter: {
+                input: "$activities",
+                cond: {
+                  $gte: [
+                    "$$this.createdAt",
+                    { $subtract: [new Date(), 30 * 24 * 60 * 60 * 1000] },
+                  ],
+                },
+              },
+            },
+          },
+          // Activities in last 7 days
+          weeklyActivities: {
+            $size: {
+              $filter: {
+                input: "$activities",
+                cond: {
+                  $gte: [
+                    "$$this.createdAt",
+                    { $subtract: [new Date(), 7 * 24 * 60 * 60 * 1000] },
+                  ],
+                },
+              },
+            },
+          },
+          // Alert-related activities
+          alertActivities: {
+            $size: {
+              $filter: {
+                input: "$activities",
+                cond: {
+                  $regexMatch: {
+                    input: "$$this.action",
+                    regex: "alert",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      {
+        $project: {
+          activities: 0,
+          password: 0,
+        },
+      },
+    ]);
+
+    if (!officerStats.length) {
+      return res.status(404).json({
+        success: false,
+        error: "Officer not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      data: officerStats[0],
+    });
+  } catch (error) {
+    console.error("Get officer by ID error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch officer details",
+      message: error.message,
+    });
+  }
+};
+
+// Update police profile with activity logging
 const updatePoliceProfile = async (req, res) => {
   try {
     const { name, email, station, rank } = req.body;
@@ -269,9 +597,9 @@ const updatePoliceProfile = async (req, res) => {
       }
     ).select("-password");
 
-    // Log profile update activity - FIXED: Use string ID
+    // Log profile update activity
     await logActivity(
-      req.user.policeId.toString(), // Ensure it's a string
+      req.user.policeId.toString(),
       "profile_updated",
       "profile",
       req.user.policeId.toString(),
@@ -319,7 +647,7 @@ const updatePoliceProfile = async (req, res) => {
   }
 };
 
-// Change password with activity logging - FIXED
+// Change password with activity logging
 const changePolicePassword = async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
@@ -347,7 +675,7 @@ const changePolicePassword = async (req, res) => {
     );
 
     if (!isCurrentPasswordValid) {
-      // Log failed password change attempt - FIXED: Use string ID
+      // Log failed password change attempt
       await logActivity(
         req.user.policeId.toString(),
         "profile_updated",
@@ -375,7 +703,7 @@ const changePolicePassword = async (req, res) => {
     police.password = hashedNewPassword;
     await police.save();
 
-    // Log successful password change - FIXED: Use string ID
+    // Log successful password change
     await logActivity(
       req.user.policeId.toString(),
       "profile_updated",
@@ -398,10 +726,10 @@ const changePolicePassword = async (req, res) => {
   }
 };
 
-// Logout with activity logging - FIXED
+// Logout with activity logging
 const logoutPolice = async (req, res) => {
   try {
-    // Log logout activity - FIXED: Use string ID
+    // Log logout activity
     await logActivity(
       req.user.policeId.toString(),
       "logout",
@@ -424,7 +752,7 @@ const logoutPolice = async (req, res) => {
   }
 };
 
-// Update officer status (Admin only) - FIXED
+// Update officer status (Admin only)
 const updateOfficerStatus = async (req, res) => {
   try {
     if (req.user.policeRole !== "admin_police") {
@@ -457,7 +785,7 @@ const updateOfficerStatus = async (req, res) => {
       });
     }
 
-    // Log status update activity - FIXED: Use string IDs
+    // Log status update activity
     await logActivity(
       req.user.policeId.toString(),
       "profile_updated",
@@ -486,7 +814,7 @@ const updateOfficerStatus = async (req, res) => {
   }
 };
 
-// Keep all other functions unchanged...
+// Get police profile
 const getPoliceProfile = async (req, res) => {
   try {
     const police = await Police.findById(req.user.policeId).select("-password");
@@ -523,6 +851,7 @@ const getPoliceProfile = async (req, res) => {
   }
 };
 
+// Refresh police token
 const refreshPoliceToken = async (req, res) => {
   try {
     const police = await Police.findById(req.user.policeId);
@@ -545,197 +874,6 @@ const refreshPoliceToken = async (req, res) => {
     res.status(500).json({
       success: false,
       error: "Failed to refresh token",
-    });
-  }
-};
-
-const getAllPoliceOfficers = async (req, res) => {
-  try {
-    // Only admin police can access this
-    if (req.user.policeRole !== "admin_police") {
-      return res.status(403).json({
-        success: false,
-        error: "Access denied. Admin police role required.",
-      });
-    }
-
-    const {
-      page = 1,
-      limit = 10,
-      search = "",
-      isActive = null,
-      station = null,
-      role = null,
-    } = req.query;
-
-    // Build filter object
-    const filter = {};
-    if (search) {
-      filter.$or = [
-        { name: { $regex: search, $options: "i" } },
-        { email: { $regex: search, $options: "i" } },
-        { badgeNumber: { $regex: search, $options: "i" } },
-        { station: { $regex: search, $options: "i" } },
-      ];
-    }
-    if (isActive !== null) {
-      filter.isActive = isActive === "true";
-    }
-    if (station) {
-      filter.station = { $regex: station, $options: "i" };
-    }
-    if (role) {
-      filter.role = role;
-    }
-
-    // Calculate pagination
-    const skip = (page - 1) * limit;
-
-    // Get police officers with pagination
-    const [officers, totalCount] = await Promise.all([
-      Police.find(filter)
-        .select("-password")
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(parseInt(limit))
-        .lean(),
-      Police.countDocuments(filter),
-    ]);
-
-    // Calculate pagination info
-    const totalPages = Math.ceil(totalCount / limit);
-    const hasNextPage = page < totalPages;
-    const hasPrevPage = page > 1;
-
-    res.json({
-      success: true,
-      data: {
-        officers,
-        pagination: {
-          currentPage: parseInt(page),
-          totalPages,
-          totalCount,
-          hasNextPage,
-          hasPrevPage,
-          limit: parseInt(limit),
-        },
-        filters: {
-          search,
-          isActive,
-          station,
-          role,
-        },
-      },
-    });
-  } catch (error) {
-    console.error("Get all police officers error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Failed to fetch police officers",
-      message: error.message,
-    });
-  }
-};
-
-const getSubPoliceOfficers = async (req, res) => {
-  try {
-    console.log("=== SUB-POLICE DEBUG ===");
-    console.log("User role:", req.user.policeRole);
-    console.log("Query params:", req.query);
-
-    // Only admin police can access this
-    if (req.user.policeRole !== "admin_police") {
-      return res.status(403).json({
-        success: false,
-        error: "Access denied. Admin police role required.",
-      });
-    }
-
-    const { page = 1, limit = 10, isActive = null, station = null } = req.query;
-
-    const filter = {
-      role: "sub_police",
-    };
-
-    if (isActive !== null && isActive !== undefined) {
-      filter.isActive = isActive === "true";
-    }
-
-    if (station) {
-      filter.station = { $regex: station, $options: "i" };
-    }
-
-    console.log("Filter being used:", filter);
-
-    const skip = (page - 1) * limit;
-
-    const [subPolice, totalCount] = await Promise.all([
-      Police.find(filter)
-        .select("-password")
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(parseInt(limit))
-        .lean(),
-      Police.countDocuments(filter),
-    ]);
-
-    console.log("Found sub-police count:", totalCount);
-    console.log("Sub-police officers:", subPolice);
-
-    const totalPages = Math.ceil(totalCount / limit);
-
-    res.json({
-      success: true,
-      data: {
-        officers: subPolice,
-        pagination: {
-          currentPage: parseInt(page),
-          totalPages,
-          totalCount,
-          hasNextPage: page < totalPages,
-          hasPrevPage: page > 1,
-          limit: parseInt(limit),
-        },
-      },
-    });
-  } catch (error) {
-    console.error("Get sub-police officers error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Failed to fetch sub-police officers",
-    });
-  }
-};
-
-const getOfficerById = async (req, res) => {
-  try {
-    if (req.user.policeRole !== "admin_police") {
-      return res.status(403).json({
-        success: false,
-        error: "Access denied. Admin police role required.",
-      });
-    }
-
-    const { officerId } = req.params;
-
-    const officer = await Police.findById(officerId).select("-password");
-
-    if (!officer) {
-      return res.status(404).json({
-        success: false,
-        error: "Officer not found",
-      });
-    }
-
-    res.json({
-      success: true,
-      data: officer,
-    });
-  } catch (error) {
-    console.error("Get officer by ID error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Failed to fetch officer details",
     });
   }
 };

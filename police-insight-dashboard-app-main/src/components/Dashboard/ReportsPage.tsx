@@ -525,6 +525,41 @@ export default function ReportsPage() {
           </div>
         )}
 
+        {/* Report Type Selection */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {[
+            {
+              type: "area" as const,
+              icon: Building2,
+              title: "All Hotels Overview",
+              desc: "View statistics for all hotels in the area",
+            },
+            {
+              type: "specific" as const,
+              icon: Filter,
+              title: "Specific Hotel Analysis",
+              desc: "Select specific hotels for detailed comparison",
+            },
+          ].map(({ type, icon: Icon, title, desc }) => (
+            <div
+              key={type}
+              onClick={() => setReportType(type)}
+              className={`cursor-pointer rounded-xl border-2 p-6 transition-all ${
+                reportType === type
+                  ? "border-blue-500 bg-blue-50 shadow-lg"
+                  : "border-gray-200 hover:border-blue-300 bg-white"
+              }`}
+            >
+              <div className="text-center">
+                <div className="mx-auto h-12 w-12 rounded-full flex items-center justify-center mb-3 bg-blue-100">
+                  <Icon className="h-6 w-6 text-blue-600" />
+                </div>
+                <h3 className="font-semibold text-lg mb-2">{title}</h3>
+                <p className="text-gray-600 text-sm">{desc}</p>
+              </div>
+            </div>
+          ))}
+        </div>
         {/* Filters */}
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
           <h3 className="font-semibold text-lg mb-4">Filters</h3>
@@ -568,43 +603,6 @@ export default function ReportsPage() {
             </select>
           </div>
         </div>
-
-        {/* Report Type Selection */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {[
-            {
-              type: "area" as const,
-              icon: Building2,
-              title: "All Hotels Overview",
-              desc: "View statistics for all hotels in the area",
-            },
-            {
-              type: "specific" as const,
-              icon: Filter,
-              title: "Specific Hotel Analysis",
-              desc: "Select specific hotels for detailed comparison",
-            },
-          ].map(({ type, icon: Icon, title, desc }) => (
-            <div
-              key={type}
-              onClick={() => setReportType(type)}
-              className={`cursor-pointer rounded-xl border-2 p-6 transition-all ${
-                reportType === type
-                  ? "border-blue-500 bg-blue-50 shadow-lg"
-                  : "border-gray-200 hover:border-blue-300 bg-white"
-              }`}
-            >
-              <div className="text-center">
-                <div className="mx-auto h-12 w-12 rounded-full flex items-center justify-center mb-3 bg-blue-100">
-                  <Icon className="h-6 w-6 text-blue-600" />
-                </div>
-                <h3 className="font-semibold text-lg mb-2">{title}</h3>
-                <p className="text-gray-600 text-sm">{desc}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-
         {/* Hotel Selection (for specific reports) */}
         {reportType === "specific" && (
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm">

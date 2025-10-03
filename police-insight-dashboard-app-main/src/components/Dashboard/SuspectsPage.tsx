@@ -12,7 +12,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import ViewSuspect from "./ViewSuspect";
-
 import { usePoliceAuth } from "@/contexts/PoliceAuthContext";
 import {
   Dialog,
@@ -79,6 +78,7 @@ export default function SuspectsPage() {
     vehicle: "",
     photo: null as File | null,
   });
+
   const { token, user, isAuthenticated, isLoading } = usePoliceAuth();
 
   // Fetch alerts when component mounts for suspects tab
@@ -171,7 +171,6 @@ export default function SuspectsPage() {
     }
   }, [alertFilters, activeTab]);
 
-  // In SuspectsPage.tsx - Updated fetchAlerts function with debugging
   const fetchAlerts = async () => {
     setLoading(true);
     try {
@@ -192,9 +191,6 @@ export default function SuspectsPage() {
       const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:5000";
       const fullUrl = `${apiUrl}/api/police/alerts?${params}`;
 
-      console.log("Fetching alerts from:", fullUrl);
-      console.log("Using token:", token?.substring(0, 20) + "...");
-
       const response = await fetch(fullUrl, {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -202,27 +198,11 @@ export default function SuspectsPage() {
         },
       });
 
-      console.log("Response status:", response.status);
-      console.log(
-        "Response headers:",
-        Object.fromEntries(response.headers.entries())
-      );
-
-      // Check the actual response content before parsing
-      const responseText = await response.text();
-      console.log("Raw response:", responseText.substring(0, 200) + "...");
-
       if (response.ok) {
-        try {
-          const data = JSON.parse(responseText);
-          console.log("Parsed data:", data);
-          setAlerts(data.alerts || []);
-        } catch (parseError) {
-          console.error("JSON parse error:", parseError);
-          console.error("Response was:", responseText);
-        }
+        const data = await response.json();
+        setAlerts(data.alerts || []);
       } else {
-        console.error("HTTP error:", response.status, responseText);
+        console.error("HTTP error:", response.status);
       }
     } catch (error) {
       console.error("Network error:", error);
@@ -255,8 +235,6 @@ export default function SuspectsPage() {
         if (selectedAlert && selectedAlert.id === alertId) {
           setSelectedAlert((prev) => ({ ...prev, status }));
         }
-
-        // Activity logging is now handled automatically by backend
         console.log(`Alert ${alertId} status updated to ${status}`);
       }
     } catch (error) {
@@ -321,7 +299,6 @@ export default function SuspectsPage() {
 
     setIsSubmitting(true);
 
-    // Since suspects come from alerts, you might want to mark associated alerts as resolved
     try {
       if (selectedSuspect.associatedAlerts) {
         for (const alert of selectedSuspect.associatedAlerts) {
@@ -350,13 +327,7 @@ export default function SuspectsPage() {
   };
 
   const handleViewSuspect = (alert) => {
-    console.log("Eye button clicked for alert:", alert.id);
-    console.log("Alert data:", alert);
-
-    // Check if alert has guest information that we can convert to suspect format
     if (alert.guest) {
-      console.log("Guest data found:", alert.guest);
-
       // Convert guest info to suspect format for ViewSuspect component
       const suspectData = {
         id: alert.guest.id || `guest-${alert.id}`,
@@ -398,14 +369,10 @@ export default function SuspectsPage() {
         },
       };
 
-      console.log("Formatted suspect data:", suspectData);
-      console.log("Setting selectedSuspectForView and showing modal");
-
       // Set the suspect data and show modal
       setSelectedSuspectForView(suspectData);
       setShowViewSuspectModal(true);
     } else {
-      console.log("No guest data found, showing alert modal instead");
       // Fallback to show alert details if no guest info
       setSelectedAlert(alert);
       setShowAlertModal(true);
@@ -1275,12 +1242,11 @@ export default function SuspectsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* View Suspect Modal - Placed at the end to avoid conflicts */}
+      {/* View Suspect Modal */}
       {showViewSuspectModal && selectedSuspectForView && (
         <ViewSuspect
           isOpen={showViewSuspectModal}
           onClose={() => {
-            console.log("Closing ViewSuspect modal");
             setShowViewSuspectModal(false);
             setSelectedSuspectForView(null);
           }}

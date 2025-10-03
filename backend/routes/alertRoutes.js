@@ -10,6 +10,7 @@ const {
   getAlertStats,
   assignAlert,
   addTimelineEntry,
+  checkGuestAlertStatus,
 } = require("../controllers/alertController");
 const { logActivity } = require("../controllers/activityController");
 const {
@@ -21,6 +22,8 @@ const Alert = require("../models/Alert");
 
 // All alert routes require authentication
 router.use(auth);
+
+router.get("/guest/:guestId/status", checkGuestAlertStatus);
 
 // SPECIFIC ROUTES FIRST (before any dynamic routes)
 router.post("/", createAlert);

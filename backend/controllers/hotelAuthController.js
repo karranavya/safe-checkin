@@ -1,4 +1,4 @@
-// controllers/hotelAuthController.js - UPDATED with activity logging
+// controllers/hotelAuthController.js - UPDATED to match new schema
 const Hotel = require("../models/Hotel");
 const { logActivity } = require("./activityController");
 const bcrypt = require("bcryptjs");
@@ -12,53 +12,126 @@ const generateToken = (hotelId) => {
   });
 };
 
-// Register new hotel - UPDATED with activity logging
+// Register new hotel - UPDATED to match new schema
 const registerHotel = async (req, res) => {
   try {
     const {
       name,
+      accommodationType,
       email,
       password,
-      phone,
       ownerName,
+      ownerPhone,
+      ownerAadharNumber,
       numberOfRooms,
-      roomRate,
       address,
+      gstNumber,
+      labourLicenceNumber,
+      hotelLicenceNumber,
       registeredByPolice,
       policeOfficerId,
       policeOfficerInfo,
     } = req.body;
 
-    // Validate required fields
+    console.log("📝 Registration request received:", {
+      name,
+      accommodationType,
+      email: email ? email.substring(0, 10) + "..." : "missing",
+      ownerName,
+      ownerPhone,
+      numberOfRooms,
+      address,
+      gstNumber,
+      labourLicenceNumber,
+      hotelLicenceNumber,
+    });
+
+    // Validate required fields - UPDATED field names
     if (
       !name ||
+      !accommodationType ||
       !email ||
       !password ||
-      !phone ||
       !ownerName ||
+      !ownerPhone ||
+      !ownerAadharNumber ||
       !numberOfRooms ||
-      !roomRate
+      !address?.street ||
+      !address?.city ||
+      !address?.state ||
+      !address?.zipCode ||
+      !gstNumber ||
+      !labourLicenceNumber ||
+      !hotelLicenceNumber
     ) {
+      console.log("❌ Missing required fields");
       return res.status(400).json({
         error: "All required fields must be provided",
         required: [
           "name",
+          "accommodationType",
           "email",
           "password",
-          "phone",
           "ownerName",
+          "ownerPhone",
+          "ownerAadharNumber",
           "numberOfRooms",
-          "roomRate",
+          "address.street",
+          "address.city",
+          "address.state",
+          "address.zipCode",
+          "gstNumber",
+          "labourLicenceNumber",
+          "hotelLicenceNumber",
         ],
+        received: {
+          name: !!name,
+          accommodationType: !!accommodationType,
+          email: !!email,
+          password: !!password,
+          ownerName: !!ownerName,
+          ownerPhone: !!ownerPhone,
+          ownerAadharNumber: !!ownerAadharNumber,
+          numberOfRooms: !!numberOfRooms,
+          addressStreet: !!address?.street,
+          addressCity: !!address?.city,
+          addressState: !!address?.state,
+          addressZipCode: !!address?.zipCode,
+          gstNumber: !!gstNumber,
+          labourLicenceNumber: !!labourLicenceNumber,
+          hotelLicenceNumber: !!hotelLicenceNumber,
+        },
       });
     }
 
-    // Check if hotel already exists
-    const existingHotel = await Hotel.findOne({ email: email.toLowerCase() });
-    if (existingHotel) {
+    // Check for duplicate email
+    const existingHotelEmail = await Hotel.findOne({
+      email: email.toLowerCase(),
+    });
+    if (existingHotelEmail) {
       return res.status(400).json({
         error: "Hotel with this email already exists",
         code: "EMAIL_EXISTS",
+      });
+    }
+
+    // Check for duplicate GST number
+    const existingGST = await Hotel.findOne({
+      gstNumber: gstNumber.toUpperCase(),
+    });
+    if (existingGST) {
+      return res.status(400).json({
+        error: "Hotel with this GST number already exists",
+        code: "GST_EXISTS",
+      });
+    }
+
+    // Check for duplicate Aadhar number
+    const existingAadhar = await Hotel.findOne({ ownerAadharNumber });
+    if (existingAadhar) {
+      return res.status(400).json({
+        error: "Owner with this Aadhar number already exists",
+        code: "AADHAR_EXISTS",
       });
     }
 
@@ -72,7 +145,6 @@ const registerHotel = async (req, res) => {
 
     // Check if request comes from authenticated police officer
     if (req.user && req.user.policeId) {
-      // If coming from authenticated police middleware
       actualPoliceOfficerId = req.user.policeId;
       policeOfficerData = {
         id: req.user.policeId,
@@ -82,7 +154,6 @@ const registerHotel = async (req, res) => {
         rank: req.user.rank || "Officer",
       };
     } else if (policeOfficerInfo && policeOfficerId) {
-      // If police info is passed in request body
       actualPoliceOfficerId = policeOfficerId;
       policeOfficerData = {
         id: policeOfficerId,
@@ -92,7 +163,6 @@ const registerHotel = async (req, res) => {
         rank: policeOfficerInfo.rank || "Officer",
       };
     } else if (policeOfficerId) {
-      // Fallback: Try to fetch police officer details from database
       try {
         const Police = require("../models/Police");
         const policeOfficer = await Police.findById(policeOfficerId).select(
@@ -113,25 +183,40 @@ const registerHotel = async (req, res) => {
       }
     }
 
+    // Create full address string
+    const fullAddress = `${address.street}, ${address.city}, ${address.state} ${
+      address.zipCode
+    }, ${address.country || "India"}`;
+
     const hotel = new Hotel({
       name: name.trim(),
+      accommodationType: accommodationType || "Hotel",
       email: email.toLowerCase().trim(),
       password: hashedPassword,
-      phone: phone.trim(),
       ownerName: ownerName.trim(),
+      ownerPhone: ownerPhone.trim(),
+      ownerAadharNumber: ownerAadharNumber.trim(),
       numberOfRooms: parseInt(numberOfRooms),
-      roomRate: parseFloat(roomRate),
-      address: address || {},
+      address: {
+        street: address.street.trim(),
+        city: address.city.trim(),
+        state: address.state.trim(),
+        zipCode: address.zipCode.trim(),
+        country: address.country || "India",
+        fullAddress: fullAddress,
+      },
+      gstNumber: gstNumber.toUpperCase().trim(),
+      labourLicenceNumber: labourLicenceNumber.trim(),
+      hotelLicenceNumber: hotelLicenceNumber.trim(),
       registeredByPolice: registeredByPolice || false,
-      // Store as ObjectId for proper relationship
       registeredBy: actualPoliceOfficerId
         ? new mongoose.Types.ObjectId(actualPoliceOfficerId)
         : null,
-      // Keep embedded document for quick access
       policeOfficer: policeOfficerData,
     });
 
     await hotel.save();
+    console.log("✅ Hotel saved successfully:", hotel.name);
 
     // Log activity if registered by police
     if (actualPoliceOfficerId) {
@@ -143,11 +228,13 @@ const registerHotel = async (req, res) => {
           hotel._id,
           {
             hotelName: hotel.name,
+            accommodationType: hotel.accommodationType,
             ownerName: hotel.ownerName,
             location: hotel.address,
             numberOfRooms: hotel.numberOfRooms,
+            gstNumber: hotel.gstNumber,
             registeredBy: policeOfficerData?.name || "Police Officer",
-            registrationMethod: "police_portal", // Add method tracking
+            registrationMethod: "police_portal",
           },
           req
         );
@@ -156,9 +243,9 @@ const registerHotel = async (req, res) => {
         );
       } catch (logError) {
         console.error("❌ Failed to log activity:", logError);
-        // Don't fail the main operation if logging fails
       }
     }
+
     const token = generateToken(hotel._id);
 
     res.status(201).json({
@@ -167,11 +254,15 @@ const registerHotel = async (req, res) => {
       hotel: {
         id: hotel._id,
         name: hotel.name,
+        accommodationType: hotel.accommodationType,
         email: hotel.email,
         ownerName: hotel.ownerName,
-        phone: hotel.phone,
+        ownerPhone: hotel.ownerPhone,
         numberOfRooms: hotel.numberOfRooms,
-        roomRate: hotel.roomRate,
+        address: hotel.address,
+        gstNumber: hotel.gstNumber,
+        labourLicenceNumber: hotel.labourLicenceNumber,
+        hotelLicenceNumber: hotel.hotelLicenceNumber,
         registrationDate: hotel.registrationDate,
         registeredByPolice: hotel.registeredByPolice,
         registeredBy: hotel.registeredBy,
@@ -189,6 +280,15 @@ const registerHotel = async (req, res) => {
       });
     }
 
+    if (error.code === 11000) {
+      // Handle duplicate key error
+      const field = Object.keys(error.keyPattern)[0];
+      return res.status(400).json({
+        error: `${field} already exists`,
+        code: "DUPLICATE_KEY",
+      });
+    }
+
     res.status(500).json({
       error: "Registration failed",
       message: "An error occurred during registration",
@@ -196,20 +296,19 @@ const registerHotel = async (req, res) => {
   }
 };
 
-// Update hotel profile - UPDATED with activity logging
+// Update hotel profile - UPDATED with new field names
 const updateHotelProfile = async (req, res) => {
   try {
     const {
       name,
-      phone,
+      accommodationType,
       ownerName,
+      ownerPhone,
       numberOfRooms,
-      roomRate,
       address,
       settings,
     } = req.body;
 
-    // Get current hotel data for logging
     const currentHotel = await Hotel.findById(req.hotelId);
     if (!currentHotel) {
       return res.status(404).json({ error: "Hotel not found" });
@@ -222,24 +321,27 @@ const updateHotelProfile = async (req, res) => {
       updateData.name = name.trim();
       updatedFields.push("name");
     }
-    if (phone && phone !== currentHotel.phone) {
-      updateData.phone = phone.trim();
-      updatedFields.push("phone");
+    if (
+      accommodationType &&
+      accommodationType !== currentHotel.accommodationType
+    ) {
+      updateData.accommodationType = accommodationType;
+      updatedFields.push("accommodationType");
     }
     if (ownerName && ownerName !== currentHotel.ownerName) {
       updateData.ownerName = ownerName.trim();
       updatedFields.push("ownerName");
     }
+    if (ownerPhone && ownerPhone !== currentHotel.ownerPhone) {
+      updateData.ownerPhone = ownerPhone.trim();
+      updatedFields.push("ownerPhone");
+    }
     if (numberOfRooms && numberOfRooms !== currentHotel.numberOfRooms) {
       updateData.numberOfRooms = parseInt(numberOfRooms);
       updatedFields.push("numberOfRooms");
     }
-    if (roomRate && roomRate !== currentHotel.roomRate) {
-      updateData.roomRate = parseFloat(roomRate);
-      updatedFields.push("roomRate");
-    }
     if (address) {
-      updateData.address = address;
+      updateData.address = { ...currentHotel.address, ...address };
       updatedFields.push("address");
     }
     if (settings) {
@@ -264,10 +366,10 @@ const updateHotelProfile = async (req, res) => {
           updatedFields,
           previousData: {
             name: currentHotel.name,
-            phone: currentHotel.phone,
+            accommodationType: currentHotel.accommodationType,
             ownerName: currentHotel.ownerName,
+            ownerPhone: currentHotel.ownerPhone,
             numberOfRooms: currentHotel.numberOfRooms,
-            roomRate: currentHotel.roomRate,
           },
           newData: updateData,
         },
@@ -280,11 +382,11 @@ const updateHotelProfile = async (req, res) => {
       hotel: {
         id: hotel._id,
         name: hotel.name,
+        accommodationType: hotel.accommodationType,
         email: hotel.email,
         ownerName: hotel.ownerName,
-        phone: hotel.phone,
+        ownerPhone: hotel.ownerPhone,
         numberOfRooms: hotel.numberOfRooms,
-        roomRate: hotel.roomRate,
         address: hotel.address,
         settings: hotel.settings,
       },
@@ -306,19 +408,17 @@ const updateHotelProfile = async (req, res) => {
   }
 };
 
-// Rest of the functions remain the same...
+// Keep all other existing functions unchanged...
 const loginHotel = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // Validate input
     if (!email || !password) {
       return res.status(400).json({
         error: "Email and password are required",
       });
     }
 
-    // Find hotel
     const hotel = await Hotel.findOne({
       email: email.toLowerCase().trim(),
       isActive: true,
@@ -331,7 +431,6 @@ const loginHotel = async (req, res) => {
       });
     }
 
-    // Check password
     const isPasswordValid = await bcrypt.compare(password, hotel.password);
     if (!isPasswordValid) {
       return res.status(401).json({
@@ -340,11 +439,9 @@ const loginHotel = async (req, res) => {
       });
     }
 
-    // Update last login
     hotel.lastLogin = new Date();
     await hotel.save();
 
-    // Generate token
     const token = generateToken(hotel._id);
 
     res.json({
@@ -353,11 +450,12 @@ const loginHotel = async (req, res) => {
       hotel: {
         id: hotel._id,
         name: hotel.name,
+        accommodationType: hotel.accommodationType,
         email: hotel.email,
         ownerName: hotel.ownerName,
-        phone: hotel.phone,
+        ownerPhone: hotel.ownerPhone,
         numberOfRooms: hotel.numberOfRooms,
-        roomRate: hotel.roomRate,
+        address: hotel.address,
         lastLogin: hotel.lastLogin,
         settings: hotel.settings,
       },
@@ -371,10 +469,48 @@ const loginHotel = async (req, res) => {
   }
 };
 
-// Add hotel verification function for police
+// Rest of functions remain the same...
+const getHotelProfile = async (req, res) => {
+  try {
+    const hotel = await Hotel.findById(req.hotelId)
+      .populate("totalGuests")
+      .populate("activeGuests");
+
+    if (!hotel) {
+      return res.status(404).json({
+        error: "Hotel not found",
+      });
+    }
+
+    res.json({
+      hotel: {
+        id: hotel._id,
+        name: hotel.name,
+        accommodationType: hotel.accommodationType,
+        email: hotel.email,
+        ownerName: hotel.ownerName,
+        ownerPhone: hotel.ownerPhone,
+        numberOfRooms: hotel.numberOfRooms,
+        address: hotel.address,
+        gstNumber: hotel.gstNumber,
+        registrationDate: hotel.registrationDate,
+        lastLogin: hotel.lastLogin,
+        settings: hotel.settings,
+        totalGuests: hotel.totalGuests,
+        activeGuests: hotel.activeGuests,
+      },
+    });
+  } catch (error) {
+    console.error("Get hotel profile error:", error);
+    res.status(500).json({
+      error: "Failed to fetch hotel profile",
+    });
+  }
+};
+
+// Keep all other functions as they were...
 const verifyHotel = async (req, res) => {
   try {
-    // Only police can verify hotels
     if (!req.user || !req.user.policeId) {
       return res.status(403).json({
         error: "Only police officers can verify hotels",
@@ -396,12 +532,13 @@ const verifyHotel = async (req, res) => {
         error: "Hotel is already verified",
       });
     }
+
     const previousState = {
       isVerified: hotel.isVerified,
       verifiedBy: hotel.verifiedBy,
       verifiedAt: hotel.verifiedAt,
     };
-    // Update hotel verification status
+
     hotel.isVerified = true;
     hotel.verifiedBy = req.user.policeId;
     hotel.verifiedAt = new Date();
@@ -409,7 +546,6 @@ const verifyHotel = async (req, res) => {
 
     await hotel.save();
 
-    // Log the verification activity
     try {
       await logActivity(
         req.user.policeId,
@@ -454,44 +590,6 @@ const verifyHotel = async (req, res) => {
   }
 };
 
-// Keep all other existing functions unchanged...
-const getHotelProfile = async (req, res) => {
-  try {
-    const hotel = await Hotel.findById(req.hotelId)
-      .populate("totalGuests")
-      .populate("activeGuests");
-
-    if (!hotel) {
-      return res.status(404).json({
-        error: "Hotel not found",
-      });
-    }
-
-    res.json({
-      hotel: {
-        id: hotel._id,
-        name: hotel.name,
-        email: hotel.email,
-        ownerName: hotel.ownerName,
-        phone: hotel.phone,
-        numberOfRooms: hotel.numberOfRooms,
-        roomRate: hotel.roomRate,
-        address: hotel.address,
-        registrationDate: hotel.registrationDate,
-        lastLogin: hotel.lastLogin,
-        settings: hotel.settings,
-        totalGuests: hotel.totalGuests,
-        activeGuests: hotel.activeGuests,
-      },
-    });
-  } catch (error) {
-    console.error("Get hotel profile error:", error);
-    res.status(500).json({
-      error: "Failed to fetch hotel profile",
-    });
-  }
-};
-
 const changePassword = async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
@@ -510,7 +608,6 @@ const changePassword = async (req, res) => {
 
     const hotel = await Hotel.findById(req.hotelId);
 
-    // Verify current password
     const isCurrentPasswordValid = await bcrypt.compare(
       currentPassword,
       hotel.password
@@ -521,11 +618,9 @@ const changePassword = async (req, res) => {
       });
     }
 
-    // Hash new password
     const salt = await bcrypt.genSalt(12);
     const hashedNewPassword = await bcrypt.hash(newPassword, salt);
 
-    // Update password
     hotel.password = hashedNewPassword;
     await hotel.save();
 
@@ -637,7 +732,6 @@ const getHotelStats = async (req, res) => {
 
 const getAllHotels = async (req, res) => {
   try {
-    // Get query parameters for filtering and pagination
     const {
       page = 1,
       limit = 10,
@@ -646,7 +740,6 @@ const getAllHotels = async (req, res) => {
       registeredByPolice = null,
     } = req.query;
 
-    // Build filter object
     const filter = {};
 
     if (search) {
@@ -665,21 +758,18 @@ const getAllHotels = async (req, res) => {
       filter.registeredByPolice = registeredByPolice === "true";
     }
 
-    // Calculate pagination
     const skip = (page - 1) * limit;
 
-    // Get hotels with pagination
     const [hotels, totalCount] = await Promise.all([
       Hotel.find(filter)
-        .select("-password") // Exclude password field
+        .select("-password")
         .sort({ registrationDate: -1 })
         .skip(skip)
         .limit(parseInt(limit))
-        .lean(), // Use lean() for better performance
+        .lean(),
       Hotel.countDocuments(filter),
     ]);
 
-    // Calculate pagination info
     const totalPages = Math.ceil(totalCount / limit);
     const hasNextPage = page < totalPages;
     const hasPrevPage = page > 1;
@@ -718,5 +808,5 @@ module.exports = {
   logoutHotel,
   getHotelStats,
   getAllHotels,
-  verifyHotel, // Add the new verification function
+  verifyHotel,
 };

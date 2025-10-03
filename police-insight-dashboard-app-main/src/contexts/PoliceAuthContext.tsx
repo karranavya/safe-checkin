@@ -18,6 +18,7 @@ interface PoliceUser {
   role: "admin_police" | "sub_police"; // ADD THIS LINE
   lastLoginAt?: string;
   loginCount?: number;
+  policeRole: string;
 }
 
 interface PoliceAuthContextType {

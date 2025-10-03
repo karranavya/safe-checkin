@@ -1,4 +1,4 @@
-// components/Dashboard/AdminDashboard/SubPoliceManagement.tsx
+// components/Dashboard/AdminDashboard/SubPoliceManagement.tsx - ENHANCED WITH REAL-TIME DATA
 import React, { useState, useEffect } from "react";
 import {
   Card,
@@ -10,7 +10,16 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Search, Plus, RefreshCw, Filter, Users } from "lucide-react";
+import {
+  Search,
+  Plus,
+  RefreshCw,
+  Filter,
+  Users,
+  BarChart3,
+  TrendingUp,
+  Activity,
+} from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -33,6 +42,11 @@ interface SubPoliceOfficer {
   lastLoginAt: string;
   loginCount: number;
   createdAt: string;
+  // Enhanced with real activity data
+  totalActivities?: number;
+  recentActivities?: number;
+  monthlyActivities?: number;
+  weeklyActivities?: number;
 }
 
 interface PaginationData {
@@ -44,8 +58,21 @@ interface PaginationData {
   hasPrevPage: boolean;
 }
 
+interface DashboardStats {
+  totalOfficers: number;
+  activeOfficers: number;
+  totalActivities: number;
+  averageActivitiesPerOfficer: number;
+}
+
 export const SubPoliceManagement = () => {
   const [officers, setOfficers] = useState<SubPoliceOfficer[]>([]);
+  const [dashboardStats, setDashboardStats] = useState<DashboardStats>({
+    totalOfficers: 0,
+    activeOfficers: 0,
+    totalActivities: 0,
+    averageActivitiesPerOfficer: 0,
+  });
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [filters, setFilters] = useState({
@@ -66,12 +93,22 @@ export const SubPoliceManagement = () => {
 
   useEffect(() => {
     fetchOfficers();
+    // Set up auto-refresh every 30 seconds for real-time updates [web:78][web:45]
+    const interval = setInterval(() => {
+      fetchOfficers(pagination.currentPage, filters, true);
+    }, 30000);
+
+    return () => clearInterval(interval);
   }, []);
 
-  const fetchOfficers = async (page = 1, customFilters = filters) => {
+  const fetchOfficers = async (
+    page = 1,
+    customFilters = filters,
+    silent = false
+  ) => {
     try {
-      setIsLoading(page === 1);
-      setIsRefreshing(page !== 1);
+      setIsLoading(page === 1 && !silent);
+      setIsRefreshing(page !== 1 || silent);
 
       const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:5000";
       const token =
@@ -81,7 +118,7 @@ export const SubPoliceManagement = () => {
       // Build query parameters
       const queryParams = new URLSearchParams({
         page: page.toString(),
-        limit: "10",
+        limit: "12", // Show more officers in grid
       });
 
       if (customFilters.isActive !== "all")
@@ -89,7 +126,7 @@ export const SubPoliceManagement = () => {
       if (customFilters.station !== "all")
         queryParams.append("station", customFilters.station);
 
-      console.log("Fetching sub-police officers...");
+      console.log("Fetching sub-police officers with real activity data...");
 
       const response = await fetch(
         `${apiUrl}/api/police/sub-police?${queryParams}`,
@@ -98,29 +135,59 @@ export const SubPoliceManagement = () => {
         }
       );
 
-      console.log("Response status:", response.status);
-
       if (response.ok) {
         const data = await response.json();
-        console.log("Sub-police data:", data);
+        console.log("Sub-police data with activity counts:", data);
+
+        const officersWithStats = data.data.officers || [];
 
         if (page === 1) {
-          setOfficers(data.data.officers || []);
+          setOfficers(officersWithStats);
         } else {
-          setOfficers((prev) => [...prev, ...(data.data.officers || [])]);
+          setOfficers((prev) => [...prev, ...officersWithStats]);
         }
 
         setPagination(data.data.pagination);
+
+        // Calculate dashboard statistics [web:70]
+        const totalActivities = officersWithStats.reduce(
+          (sum: number, officer: SubPoliceOfficer) =>
+            sum + (officer.totalActivities || 0),
+          0
+        );
+        const activeOfficers = officersWithStats.filter(
+          (officer: SubPoliceOfficer) => officer.isActive
+        ).length;
+
+        setDashboardStats({
+          totalOfficers: data.data.pagination.totalCount,
+          activeOfficers,
+          totalActivities,
+          averageActivitiesPerOfficer:
+            officersWithStats.length > 0
+              ? Math.round((totalActivities / officersWithStats.length) * 10) /
+                10
+              : 0,
+        });
+
+        if (!silent) {
+          toast({
+            title: "Success",
+            description: `Loaded ${officersWithStats.length} officers with real-time activity data`,
+          });
+        }
       } else {
         throw new Error("Failed to fetch officers");
       }
     } catch (error) {
       console.error("Error fetching officers:", error);
-      toast({
-        title: "Error",
-        description: "Failed to load officers",
-        variant: "destructive",
-      });
+      if (!silent) {
+        toast({
+          title: "Error",
+          description: "Failed to load officers",
+          variant: "destructive",
+        });
+      }
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -188,14 +255,27 @@ export const SubPoliceManagement = () => {
     }
   };
 
+  // Filter officers client-side for search
+  const filteredOfficers = officers.filter((officer) => {
+    if (!filters.search) return true;
+    const searchTerm = filters.search.toLowerCase();
+    return (
+      officer.name.toLowerCase().includes(searchTerm) ||
+      officer.badgeNumber.toLowerCase().includes(searchTerm) ||
+      officer.email.toLowerCase().includes(searchTerm) ||
+      officer.station.toLowerCase().includes(searchTerm)
+    );
+  });
+
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* Enhanced Header with Real-time Statistics [web:78][web:70] */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold">Sub-Police Management</h2>
           <p className="text-muted-foreground">
-            Monitor and manage {pagination.totalCount} sub-police officers
+            Monitor and manage {dashboardStats.totalOfficers} sub-police
+            officers with real-time activity tracking
           </p>
         </div>
         <div className="flex space-x-2">
@@ -216,10 +296,79 @@ export const SubPoliceManagement = () => {
         </div>
       </div>
 
+      {/* Real-time Dashboard Statistics [web:70] */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">
+              Total Officers
+            </CardTitle>
+            <Users className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-blue-600">
+              {dashboardStats.totalOfficers}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {dashboardStats.activeOfficers} active
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">
+              Total Activities
+            </CardTitle>
+            <Activity className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-600">
+              {dashboardStats.totalActivities.toLocaleString()}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              All officer activities
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">
+              Average Activities
+            </CardTitle>
+            <BarChart3 className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-purple-600">
+              {dashboardStats.averageActivitiesPerOfficer}
+            </div>
+            <p className="text-xs text-muted-foreground">Per officer</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">System Status</CardTitle>
+            <TrendingUp className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-lg font-bold text-green-600">Real-time</div>
+            <p className="text-xs text-muted-foreground">
+              Data updates every 30s
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
       {/* Filters */}
       <Card>
         <CardHeader>
           <CardTitle className="text-lg">Filters & Search</CardTitle>
+          <CardDescription>
+            Filter officers by status, station, or search by name, badge, or
+            email
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -273,14 +422,19 @@ export const SubPoliceManagement = () => {
         </CardContent>
       </Card>
 
-      {/* Officers Grid */}
+      {/* Officers Grid with Real Activity Data */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center justify-between">
             <span>Officers</span>
-            <Badge variant="secondary">
-              {pagination.totalCount} total officers
-            </Badge>
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary">
+                {filteredOfficers.length} showing
+              </Badge>
+              <Badge variant="outline">
+                {dashboardStats.totalOfficers} total
+              </Badge>
+            </div>
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -288,9 +442,9 @@ export const SubPoliceManagement = () => {
             <div className="flex items-center justify-center h-32">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
             </div>
-          ) : officers.length > 0 ? (
+          ) : filteredOfficers.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {officers.map((officer) => (
+              {filteredOfficers.map((officer) => (
                 <SubPoliceCard
                   key={officer._id}
                   officer={officer}
@@ -306,8 +460,38 @@ export const SubPoliceManagement = () => {
               </p>
             </div>
           )}
+
+          {/* Load More Button */}
+          {pagination.hasNextPage && !isLoading && (
+            <div className="text-center mt-6">
+              <Button
+                variant="outline"
+                onClick={() =>
+                  fetchOfficers(pagination.currentPage + 1, filters)
+                }
+                disabled={isRefreshing}
+              >
+                {isRefreshing ? (
+                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Plus className="h-4 w-4 mr-2" />
+                )}
+                Load More Officers
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
+
+      {/* Real-time Update Indicator */}
+      {isRefreshing && (
+        <div className="fixed bottom-4 right-4 bg-blue-600 text-white px-4 py-2 rounded-lg shadow-lg">
+          <div className="flex items-center gap-2">
+            <RefreshCw className="h-4 w-4 animate-spin" />
+            <span className="text-sm">Updating real-time data...</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

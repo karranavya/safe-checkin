@@ -1,9 +1,344 @@
-// controllers/alertController.js - UPDATED with activity logging
+// controllers/alertController.js - COMPLETE ENHANCED VERSION WITH SUSPECT MANAGEMENT
 const Alert = require("../models/Alert");
 const Guest = require("../models/Guest");
 const { logActivity } = require("./activityController");
+const mongoose = require("mongoose");
 
-// Create new alert - UPDATED with activity logging
+// ⭐ NEW: Mark alert as suspect and create suspect ID
+const markAsSuspect = async (req, res) => {
+  try {
+    const { alertId } = req.params;
+
+    const alert = await Alert.findById(alertId).populate("guestId");
+
+    if (!alert) {
+      return res.status(404).json({
+        success: false,
+        error: "Alert not found",
+      });
+    }
+
+    // Generate unique suspect ID
+    const suspectId = `SUSPECT_${alert.guestId._id}_${Date.now()}`;
+
+    // Create backup of suspect data
+    const suspectBackup = {
+      name: alert.guestId.name,
+      phone: alert.guestId.phone,
+      aadhar: alert.guestId.aadhar,
+      vehicle: alert.guestId.vehicle || "",
+      email: alert.guestId.email || "",
+      address: alert.guestId.address || "",
+      age: alert.guestId.age || null,
+      occupation: alert.guestId.occupation || "",
+    };
+
+    // Update alert with suspect information
+    alert.suspectDetails = {
+      isSuspect: true,
+      suspectId: suspectId,
+      suspectDeleted: false,
+      suspectDeletedAt: null,
+      suspectDeletedBy: null,
+      deletionReason: null,
+      suspectBackup: suspectBackup,
+    };
+
+    await alert.save();
+
+    // Log suspect creation activity
+    await logActivity(
+      req.user?.policeId || "system",
+      "suspect_added",
+      "suspect",
+      suspectId,
+      {
+        alertId: alert._id,
+        suspectName: alert.guestId.name,
+        guestId: alert.guestId._id,
+        hotelId: alert.hotelId,
+        actionTaken: "marked_as_suspect",
+      },
+      req
+    );
+
+    res.json({
+      success: true,
+      message: "Guest marked as suspect successfully",
+      suspectId: suspectId,
+      alert: alert,
+    });
+  } catch (error) {
+    console.error("Mark as suspect error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to mark as suspect",
+      message: error.message,
+    });
+  }
+};
+
+// ⭐ NEW: Soft delete suspect
+const deleteSuspect = async (req, res) => {
+  try {
+    const { suspectId } = req.params;
+    const { reason } = req.body;
+
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({
+        success: false,
+        error: "Deletion reason is required",
+      });
+    }
+
+    // Find the suspect alert to get details for logging
+    const suspectAlert = await Alert.findOne({
+      "suspectDetails.suspectId": suspectId,
+      "suspectDetails.isSuspect": true,
+    }).populate("guestId");
+
+    if (!suspectAlert) {
+      return res.status(404).json({
+        success: false,
+        error: "Suspect not found",
+      });
+    }
+
+    const deletedBy = {
+      name: req.user?.name || "Police Officer",
+      role: req.user?.policeRole || "police",
+      badgeNumber: req.user?.badgeNumber || "",
+      policeId: req.user?.policeId?.toString() || "",
+    };
+
+    // Soft delete the suspect (update all related alerts)
+    const result = await Alert.softDeleteSuspect(
+      suspectId,
+      deletedBy,
+      reason.trim()
+    );
+
+    // Log suspect deletion activity
+    await logActivity(
+      req.user?.policeId?.toString() || "system",
+      "suspect_deleted",
+      "suspect",
+      suspectId,
+      {
+        suspectName:
+          suspectAlert.suspectDetails?.suspectBackup?.name ||
+          suspectAlert.guestId?.name,
+        deletionReason: reason.trim(),
+        deletedBy: deletedBy.name,
+        alertsAffected: result.modifiedCount,
+        guestId: suspectAlert.guestId?._id,
+        hotelId: suspectAlert.hotelId,
+        deletionMethod: "soft_delete",
+      },
+      req
+    );
+
+    res.json({
+      success: true,
+      message: "Suspect deleted successfully",
+      deletedSuspect: {
+        suspectId: suspectId,
+        name:
+          suspectAlert.suspectDetails?.suspectBackup?.name ||
+          suspectAlert.guestId?.name,
+        deletedAt: new Date(),
+        deletedBy: deletedBy.name,
+        reason: reason.trim(),
+        alertsAffected: result.modifiedCount,
+      },
+    });
+  } catch (error) {
+    console.error("Delete suspect error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to delete suspect",
+      message: error.message,
+    });
+  }
+};
+
+// ⭐ NEW: Get all suspects (for police dashboard)
+const getAllSuspects = async (req, res) => {
+  try {
+    const { includeDeleted = "false", page = 1, limit = 20 } = req.query;
+    const showDeleted = includeDeleted === "true";
+
+    // Only admin police can see deleted suspects
+    if (showDeleted && req.user?.policeRole !== "admin_police") {
+      return res.status(403).json({
+        success: false,
+        error:
+          "Access denied. Admin police role required to view deleted suspects.",
+      });
+    }
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    let suspects;
+    if (showDeleted) {
+      suspects = await Alert.getAllSuspectsForAdmin();
+    } else {
+      suspects = await Alert.getActiveSuspects();
+    }
+
+    // Transform suspects data for frontend
+    const transformedSuspects = suspects
+      .slice(skip, skip + parseInt(limit))
+      .map((alert) => {
+        const guestData =
+          alert.guestId || alert.suspectDetails?.suspectBackup || {};
+        const suspectData = alert.suspectDetails || {};
+
+        return {
+          id: suspectData.suspectId || alert._id,
+          name: guestData.name || "Unknown",
+          aadhar: guestData.aadhar || "Not Available",
+          phone: guestData.phone || "Not Available",
+          vehicle: guestData.vehicle || "",
+          photo: guestData.photo || "/placeholder-avatar.jpg",
+          email: guestData.email || "",
+          age: guestData.age || null,
+          occupation: guestData.occupation || "",
+          address: guestData.address || "",
+          dateAdded: alert.createdAt,
+
+          // Suspect-specific fields
+          isSuspect: suspectData.isSuspect || false,
+          isDeleted: suspectData.suspectDeleted || false,
+          deletedAt: suspectData.suspectDeletedAt,
+          deletedBy: suspectData.suspectDeletedBy,
+          deletionReason: suspectData.deletionReason,
+
+          // Alert information
+          alertStatus: alert.status,
+          alertPriority: alert.priority,
+          alertId: alert._id,
+
+          // Associated alerts
+          associatedAlerts: [
+            {
+              id: alert._id,
+              title: alert.title,
+              type: alert.type,
+              priority: alert.priority,
+              status: alert.status,
+              date: alert.createdAt,
+              location: alert.location
+                ? `Room ${alert.location.roomNumber}${
+                    alert.location.floor
+                      ? `, Floor ${alert.location.floor}`
+                      : ""
+                  }`
+                : "Unknown",
+            },
+          ],
+
+          // Last seen information
+          lastSeen: {
+            location: alert.location
+              ? `Room ${alert.location.roomNumber}`
+              : "Unknown",
+            date: alert.createdAt,
+            reportedBy: alert.createdBy?.name || "System",
+          },
+        };
+      });
+
+    const totalCount = suspects.length;
+    const totalPages = Math.ceil(totalCount / parseInt(limit));
+
+    res.json({
+      success: true,
+      data: {
+        suspects: transformedSuspects,
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages,
+          totalCount,
+          hasNextPage: parseInt(page) < totalPages,
+          hasPrevPage: parseInt(page) > 1,
+          limit: parseInt(limit),
+        },
+        showingDeleted: showDeleted,
+      },
+    });
+  } catch (error) {
+    console.error("Get all suspects error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch suspects",
+      message: error.message,
+    });
+  }
+};
+
+// ⭐ NEW: Restore deleted suspect (Admin only)
+const restoreSuspect = async (req, res) => {
+  try {
+    if (req.user?.policeRole !== "admin_police") {
+      return res.status(403).json({
+        success: false,
+        error: "Access denied. Admin police role required.",
+      });
+    }
+
+    const { suspectId } = req.params;
+
+    const suspectAlert = await Alert.findOne({
+      "suspectDetails.suspectId": suspectId,
+      "suspectDetails.suspectDeleted": true,
+    });
+
+    if (!suspectAlert) {
+      return res.status(404).json({
+        success: false,
+        error: "Deleted suspect not found",
+      });
+    }
+
+    const result = await Alert.restoreSuspect(suspectId);
+
+    // Log suspect restoration activity
+    await logActivity(
+      req.user.policeId.toString(),
+      "suspect_restored",
+      "suspect",
+      suspectId,
+      {
+        suspectName: suspectAlert.suspectDetails?.suspectBackup?.name,
+        restoredBy: req.user.name,
+        alertsAffected: result.modifiedCount,
+      },
+      req
+    );
+
+    res.json({
+      success: true,
+      message: "Suspect restored successfully",
+      restoredSuspect: {
+        suspectId: suspectId,
+        name: suspectAlert.suspectDetails?.suspectBackup?.name,
+        restoredAt: new Date(),
+        restoredBy: req.user.name,
+        alertsAffected: result.modifiedCount,
+      },
+    });
+  } catch (error) {
+    console.error("Restore suspect error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to restore suspect",
+      message: error.message,
+    });
+  }
+};
+
+// Create new alert - UPDATED with duplicate prevention
 const createAlert = async (req, res) => {
   try {
     const {
@@ -43,7 +378,67 @@ const createAlert = async (req, res) => {
       });
     }
 
-    // Create alert
+    // Check for existing unresolved alerts for this guest
+    const existingUnresolvedAlerts = await Alert.find({
+      guestId: guestId,
+      hotelId: req.hotelId,
+      status: {
+        $nin: ["Resolved", "Cancelled"],
+      },
+      isActive: true,
+    }).populate("guestId", "name roomNumber phone");
+
+    if (existingUnresolvedAlerts.length > 0) {
+      // Log the attempt to create duplicate alert
+      await logActivity(
+        req.user?.policeId || "hotel_staff",
+        "alert_creation_blocked",
+        "alert",
+        `blocked_${guestId}`,
+        {
+          reason: "existing_unresolved_alerts",
+          guestName: guest.name,
+          guestId: guestId,
+          existingAlertsCount: existingUnresolvedAlerts.length,
+          existingAlerts: existingUnresolvedAlerts.map((alert) => ({
+            id: alert._id,
+            title: alert.title,
+            status: alert.status,
+            priority: alert.priority,
+            createdAt: alert.createdAt,
+          })),
+          attemptedAlert: {
+            type,
+            priority,
+            title: title.trim(),
+          },
+          hotelId: req.hotelId,
+        },
+        req
+      );
+
+      return res.status(409).json({
+        error: "Cannot create new alert",
+        message: `Guest ${guest.name} already has ${existingUnresolvedAlerts.length} unresolved alert(s). Please resolve existing alerts before creating a new one.`,
+        existingAlerts: existingUnresolvedAlerts.map((alert) => ({
+          id: alert._id,
+          title: alert.title,
+          status: alert.status,
+          priority: alert.priority,
+          type: alert.type,
+          createdAt: alert.createdAt,
+          location: alert.location,
+        })),
+        guest: {
+          id: guest._id,
+          name: guest.name,
+          roomNumber: guest.roomNumber,
+          phone: guest.phone,
+        },
+      });
+    }
+
+    // Continue with alert creation
     const alert = new Alert({
       hotelId: req.hotelId,
       guestId,
@@ -71,9 +466,19 @@ const createAlert = async (req, res) => {
             role: "Hotel Staff",
           },
           timestamp: new Date(),
-          notes: "Alert created",
+          notes: "Alert created - no existing unresolved alerts found",
         },
       ],
+      // ⭐ Initialize suspect details
+      suspectDetails: {
+        isSuspect: false,
+        suspectId: null,
+        suspectDeleted: false,
+        suspectDeletedAt: null,
+        suspectDeletedBy: null,
+        deletionReason: null,
+        suspectBackup: null,
+      },
     });
 
     // If assigned to someone, add assignment to timeline
@@ -91,7 +496,7 @@ const createAlert = async (req, res) => {
 
     await alert.save();
 
-    // Log alert creation activity
+    // Log successful alert creation
     await logActivity(
       req.user?.policeId || "hotel_staff",
       "alert_created",
@@ -105,11 +510,12 @@ const createAlert = async (req, res) => {
         roomNumber: location.roomNumber,
         assignedTo: assignedTo?.name,
         hotelId: req.hotelId,
+        isNewGuest: !guest.alertsSent || guest.alertsSent.length === 0,
       },
       req
     );
 
-    // Add alert to guest's record - Initialize alertsSent if it doesn't exist
+    // Add alert to guest's record
     if (!guest.alertsSent) {
       guest.alertsSent = [];
     }
@@ -144,6 +550,7 @@ const createAlert = async (req, res) => {
         },
         assignedTo: alert.assignedTo,
         createdAt: alert.createdAt,
+        suspectDetails: alert.suspectDetails,
       },
     });
   } catch (error) {
@@ -315,7 +722,7 @@ const deleteAlert = async (req, res) => {
   }
 };
 
-// Keep all other existing functions unchanged...
+// Get all alerts
 const getAllAlerts = async (req, res) => {
   try {
     const {
@@ -395,6 +802,9 @@ const getAllAlerts = async (req, res) => {
         age: alert.age,
         responseTime: alert.responseTime,
         isActive: alert.isActive,
+        // ⭐ Include suspect information
+        suspectDetails: alert.suspectDetails,
+        suspectStatus: alert.suspectStatus,
       })),
       pagination: {
         currentPage: parseInt(page),
@@ -412,6 +822,7 @@ const getAllAlerts = async (req, res) => {
   }
 };
 
+// Get alert by ID
 const getAlertById = async (req, res) => {
   try {
     const alert = await Alert.findOne({
@@ -455,6 +866,9 @@ const getAlertById = async (req, res) => {
         age: alert.age,
         responseTime: alert.responseTime,
         isActive: alert.isActive,
+        // ⭐ Include suspect information
+        suspectDetails: alert.suspectDetails,
+        suspectStatus: alert.suspectStatus,
       },
     });
   } catch (error) {
@@ -465,6 +879,7 @@ const getAlertById = async (req, res) => {
   }
 };
 
+// Assign alert
 const assignAlert = async (req, res) => {
   try {
     const { assignedTo, notes } = req.body;
@@ -526,6 +941,7 @@ const assignAlert = async (req, res) => {
   }
 };
 
+// Add timeline entry
 const addTimelineEntry = async (req, res) => {
   try {
     const { action, notes } = req.body;
@@ -574,6 +990,7 @@ const addTimelineEntry = async (req, res) => {
   }
 };
 
+// Get alert statistics
 const getAlertStats = async (req, res) => {
   try {
     const { period = "30" } = req.query;
@@ -692,6 +1109,76 @@ const getAlertStats = async (req, res) => {
   }
 };
 
+// Check guest alert status
+const checkGuestAlertStatus = async (req, res) => {
+  try {
+    const { guestId } = req.params;
+
+    // Verify guest belongs to hotel
+    const guest = await Guest.findOne({
+      _id: guestId,
+      hotelId: req.hotelId,
+    });
+
+    if (!guest) {
+      return res.status(404).json({
+        error: "Guest not found or doesn't belong to your hotel",
+      });
+    }
+
+    // Get all alerts for this guest
+    const alerts = await Alert.find({
+      guestId: guestId,
+      hotelId: req.hotelId,
+    }).sort({ createdAt: -1 });
+
+    const unresolvedAlerts = alerts.filter(
+      (alert) =>
+        !["Resolved", "Cancelled"].includes(alert.status) && alert.isActive
+    );
+
+    const resolvedAlerts = alerts.filter((alert) =>
+      ["Resolved", "Cancelled"].includes(alert.status)
+    );
+
+    res.json({
+      guest: {
+        id: guest._id,
+        name: guest.name,
+        roomNumber: guest.roomNumber,
+        phone: guest.phone,
+      },
+      canCreateNewAlert: unresolvedAlerts.length === 0,
+      alertsSummary: {
+        total: alerts.length,
+        unresolved: unresolvedAlerts.length,
+        resolved: resolvedAlerts.length,
+      },
+      unresolvedAlerts: unresolvedAlerts.map((alert) => ({
+        id: alert._id,
+        title: alert.title,
+        status: alert.status,
+        priority: alert.priority,
+        type: alert.type,
+        createdAt: alert.createdAt,
+      })),
+      lastResolvedAlert:
+        resolvedAlerts.length > 0
+          ? {
+              id: resolvedAlerts[0]._id,
+              title: resolvedAlerts[0].title,
+              resolvedAt: resolvedAlerts[0].resolution?.resolvedAt,
+            }
+          : null,
+    });
+  } catch (error) {
+    console.error("Check guest alert status error:", error);
+    res.status(500).json({
+      error: "Failed to check guest alert status",
+    });
+  }
+};
+
 module.exports = {
   createAlert,
   getAllAlerts,
@@ -701,4 +1188,10 @@ module.exports = {
   addTimelineEntry,
   deleteAlert,
   getAlertStats,
+  checkGuestAlertStatus,
+  // ⭐ NEW: Export suspect management functions
+  markAsSuspect,
+  deleteSuspect,
+  getAllSuspects,
+  restoreSuspect,
 };
