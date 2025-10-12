@@ -1,4 +1,4 @@
-// server.js - ENHANCED VERSION with better middleware
+// server.js - FIXED CORS configuration
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
@@ -38,7 +38,8 @@ app.use(
       "http://localhost:8082",
     ],
     credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    // FIXED: Added PATCH method to allowed methods
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
@@ -71,15 +72,31 @@ mongoose
   .connect(MONGODB_URI, {
     useNewUrlParser: true,
     useUnifiedTopology: true,
-    maxPoolSize: 10, // Maintain up to 10 socket connections
-    serverSelectionTimeoutMS: 5000, // Keep trying to send operations for 5 seconds
-    socketTimeoutMS: 45000, // Close sockets after 45 seconds of inactivity
+    maxPoolSize: 10,
+    serverSelectionTimeoutMS: 5000,
+    socketTimeoutMS: 45000,
+    // ADD: Connection monitoring options
+    heartbeatFrequencyMS: 10000,
+    maxIdleTimeMS: 30000,
   })
   .then(() => console.log("✅ Connected to MongoDB successfully"))
   .catch((error) => {
     console.error("❌ MongoDB connection error:", error);
     process.exit(1);
   });
+
+// ADD: MongoDB connection event listeners
+mongoose.connection.on("connected", () => {
+  console.log("✅ Mongoose connected to MongoDB");
+});
+
+mongoose.connection.on("error", (err) => {
+  console.error("❌ Mongoose connection error:", err);
+});
+
+mongoose.connection.on("disconnected", () => {
+  console.log("📦 Mongoose disconnected");
+});
 
 /* ──────────────────────────────  ROUTES  ─────────────────────────────── */
 // Health check route
@@ -199,4 +216,5 @@ app.listen(PORT, () => {
   console.log(`📊 Environment: ${process.env.NODE_ENV || "development"}`);
   console.log(`🔒 Security headers enabled`);
   console.log(`⏱️  Rate limiting active`);
+  console.log(`🌐 CORS enabled for PATCH method`);
 });

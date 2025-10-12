@@ -31,6 +31,8 @@ const registerHotel = async (req, res) => {
       registeredByPolice,
       policeOfficerId,
       policeOfficerInfo,
+      verificationStatus,
+      verificationNotes,
     } = req.body;
 
     console.log("📝 Registration request received:", {
@@ -44,9 +46,10 @@ const registerHotel = async (req, res) => {
       gstNumber,
       labourLicenceNumber,
       hotelLicenceNumber,
+      verificationStatus,
     });
 
-    // Validate required fields - UPDATED field names
+    // Validate required fields
     if (
       !name ||
       !accommodationType ||
@@ -84,23 +87,6 @@ const registerHotel = async (req, res) => {
           "labourLicenceNumber",
           "hotelLicenceNumber",
         ],
-        received: {
-          name: !!name,
-          accommodationType: !!accommodationType,
-          email: !!email,
-          password: !!password,
-          ownerName: !!ownerName,
-          ownerPhone: !!ownerPhone,
-          ownerAadharNumber: !!ownerAadharNumber,
-          numberOfRooms: !!numberOfRooms,
-          addressStreet: !!address?.street,
-          addressCity: !!address?.city,
-          addressState: !!address?.state,
-          addressZipCode: !!address?.zipCode,
-          gstNumber: !!gstNumber,
-          labourLicenceNumber: !!labourLicenceNumber,
-          hotelLicenceNumber: !!hotelLicenceNumber,
-        },
       });
     }
 
@@ -188,6 +174,10 @@ const registerHotel = async (req, res) => {
       address.zipCode
     }, ${address.country || "India"}`;
 
+    // Set verification status (default to pending if not provided)
+    const finalVerificationStatus = verificationStatus || "pending";
+    const isVerified = finalVerificationStatus === "verified";
+
     const hotel = new Hotel({
       name: name.trim(),
       accommodationType: accommodationType || "Hotel",
@@ -213,6 +203,28 @@ const registerHotel = async (req, res) => {
         ? new mongoose.Types.ObjectId(actualPoliceOfficerId)
         : null,
       policeOfficer: policeOfficerData,
+      // NEW: Verification status fields
+      verificationStatus: finalVerificationStatus,
+      isVerified: isVerified,
+      verifiedAt: isVerified ? new Date() : null,
+      verifiedBy:
+        isVerified && actualPoliceOfficerId
+          ? new mongoose.Types.ObjectId(actualPoliceOfficerId)
+          : null,
+      verificationNotes: verificationNotes || null,
+      verificationHistory: [
+        {
+          status: finalVerificationStatus,
+          changedBy: actualPoliceOfficerId
+            ? new mongoose.Types.ObjectId(actualPoliceOfficerId)
+            : null,
+          changedAt: new Date(),
+          notes:
+            verificationNotes ||
+            `Initial registration with ${finalVerificationStatus} status`,
+          officerInfo: policeOfficerData,
+        },
+      ],
     });
 
     await hotel.save();
@@ -233,6 +245,7 @@ const registerHotel = async (req, res) => {
             location: hotel.address,
             numberOfRooms: hotel.numberOfRooms,
             gstNumber: hotel.gstNumber,
+            verificationStatus: finalVerificationStatus,
             registeredBy: policeOfficerData?.name || "Police Officer",
             registrationMethod: "police_portal",
           },
@@ -267,6 +280,10 @@ const registerHotel = async (req, res) => {
         registeredByPolice: hotel.registeredByPolice,
         registeredBy: hotel.registeredBy,
         policeOfficer: hotel.policeOfficer,
+        verificationStatus: hotel.verificationStatus,
+        isVerified: hotel.isVerified,
+        verifiedAt: hotel.verifiedAt,
+        verificationNotes: hotel.verificationNotes,
       },
     });
   } catch (error) {
@@ -295,7 +312,113 @@ const registerHotel = async (req, res) => {
     });
   }
 };
+// NEW: Update verification status function
+const updateVerificationStatus = async (req, res) => {
+  try {
+    if (!req.user || !req.user.policeId) {
+      return res.status(403).json({
+        error: "Only police officers can update verification status",
+      });
+    }
 
+    const { hotelId } = req.params;
+    const { verificationStatus, verificationNotes } = req.body;
+
+    if (
+      !verificationStatus ||
+      !["verified", "pending", "unverified"].includes(verificationStatus)
+    ) {
+      return res.status(400).json({
+        error:
+          "Valid verification status is required (verified, pending, unverified)",
+      });
+    }
+
+    const hotel = await Hotel.findById(hotelId);
+    if (!hotel) {
+      return res.status(404).json({
+        error: "Hotel not found",
+      });
+    }
+
+    const previousStatus = hotel.verificationStatus;
+    const previousIsVerified = hotel.isVerified;
+
+    // Update verification status
+    hotel.verificationStatus = verificationStatus;
+    hotel.isVerified = verificationStatus === "verified";
+    hotel.verificationNotes = verificationNotes || hotel.verificationNotes;
+
+    if (verificationStatus === "verified") {
+      hotel.verifiedAt = new Date();
+      hotel.verifiedBy = req.user.policeId;
+    } else if (verificationStatus === "unverified") {
+      hotel.verifiedAt = null;
+      hotel.verifiedBy = null;
+    }
+
+    // Add to verification history
+    hotel.verificationHistory.push({
+      status: verificationStatus,
+      changedBy: req.user.policeId,
+      changedAt: new Date(),
+      notes:
+        verificationNotes ||
+        `Status changed from ${previousStatus} to ${verificationStatus}`,
+      officerInfo: {
+        name: req.user.name,
+        badgeNumber: req.user.badgeNumber,
+        station: req.user.station,
+        rank: req.user.rank,
+      },
+    });
+
+    await hotel.save();
+
+    // Log activity
+    try {
+      await logActivity(
+        req.user.policeId,
+        "hotel_verification_updated",
+        "hotel",
+        hotel._id,
+        {
+          hotelName: hotel.name,
+          ownerName: hotel.ownerName,
+          updatedBy: req.user.name,
+          previousStatus: previousStatus,
+          newStatus: verificationStatus,
+          verificationNotes: verificationNotes,
+          previousIsVerified: previousIsVerified,
+          newIsVerified: hotel.isVerified,
+        },
+        req
+      );
+      console.log(
+        `✅ Hotel verification status updated: ${hotel.name} changed to ${verificationStatus} by ${req.user.name}`
+      );
+    } catch (logError) {
+      console.error("❌ Failed to log verification update activity:", logError);
+    }
+
+    res.json({
+      message: `Hotel verification status updated to ${verificationStatus}`,
+      hotel: {
+        id: hotel._id,
+        name: hotel.name,
+        verificationStatus: hotel.verificationStatus,
+        isVerified: hotel.isVerified,
+        verifiedAt: hotel.verifiedAt,
+        verificationNotes: hotel.verificationNotes,
+      },
+    });
+  } catch (error) {
+    console.error("Update verification status error:", error);
+    res.status(500).json({
+      error: "Failed to update verification status",
+    });
+  }
+};
 // Update hotel profile - UPDATED with new field names
 const updateHotelProfile = async (req, res) => {
   try {
@@ -389,6 +512,8 @@ const updateHotelProfile = async (req, res) => {
         numberOfRooms: hotel.numberOfRooms,
         address: hotel.address,
         settings: hotel.settings,
+        verificationStatus: hotel.verificationStatus,
+        isVerified: hotel.isVerified,
       },
     });
   } catch (error) {
@@ -458,6 +583,9 @@ const loginHotel = async (req, res) => {
         address: hotel.address,
         lastLogin: hotel.lastLogin,
         settings: hotel.settings,
+        verificationStatus: hotel.verificationStatus,
+        isVerified: hotel.isVerified,
+        verifiedAt: hotel.verifiedAt,
       },
     });
   } catch (error) {
@@ -473,8 +601,8 @@ const loginHotel = async (req, res) => {
 const getHotelProfile = async (req, res) => {
   try {
     const hotel = await Hotel.findById(req.hotelId)
-      .populate("totalGuests")
-      .populate("activeGuests");
+      .populate("verifiedBy", "name badgeNumber station rank")
+      .populate("registeredBy", "name badgeNumber station rank");
 
     if (!hotel) {
       return res.status(404).json({
@@ -496,8 +624,14 @@ const getHotelProfile = async (req, res) => {
         registrationDate: hotel.registrationDate,
         lastLogin: hotel.lastLogin,
         settings: hotel.settings,
-        totalGuests: hotel.totalGuests,
-        activeGuests: hotel.activeGuests,
+        verificationStatus: hotel.verificationStatus,
+        isVerified: hotel.isVerified,
+        verifiedAt: hotel.verifiedAt,
+        verificationNotes: hotel.verificationNotes,
+        verifiedBy: hotel.verifiedBy,
+        registeredBy: hotel.registeredBy,
+        policeOfficer: hotel.policeOfficer,
+        verificationHistory: hotel.verificationHistory,
       },
     });
   } catch (error) {
@@ -507,7 +641,6 @@ const getHotelProfile = async (req, res) => {
     });
   }
 };
-
 // Keep all other functions as they were...
 const verifyHotel = async (req, res) => {
   try {
@@ -527,22 +660,33 @@ const verifyHotel = async (req, res) => {
       });
     }
 
-    if (hotel.isVerified) {
+    if (hotel.verificationStatus === "verified") {
       return res.status(400).json({
         error: "Hotel is already verified",
       });
     }
 
-    const previousState = {
-      isVerified: hotel.isVerified,
-      verifiedBy: hotel.verifiedBy,
-      verifiedAt: hotel.verifiedAt,
-    };
+    const previousStatus = hotel.verificationStatus;
 
+    hotel.verificationStatus = "verified";
     hotel.isVerified = true;
     hotel.verifiedBy = req.user.policeId;
     hotel.verifiedAt = new Date();
     hotel.verificationNotes = verificationNotes;
+
+    // Add to verification history
+    hotel.verificationHistory.push({
+      status: "verified",
+      changedBy: req.user.policeId,
+      changedAt: new Date(),
+      notes: verificationNotes || "Hotel verified by police",
+      officerInfo: {
+        name: req.user.name,
+        badgeNumber: req.user.badgeNumber,
+        station: req.user.station,
+        rank: req.user.rank,
+      },
+    });
 
     await hotel.save();
 
@@ -557,11 +701,8 @@ const verifyHotel = async (req, res) => {
           ownerName: hotel.ownerName,
           verifiedBy: req.user.name,
           verificationNotes: verificationNotes || "Hotel verified by police",
-          previousState,
-          newState: {
-            isVerified: true,
-            verifiedAt: hotel.verifiedAt,
-          },
+          previousStatus: previousStatus,
+          newStatus: "verified",
         },
         req
       );
@@ -577,6 +718,7 @@ const verifyHotel = async (req, res) => {
       hotel: {
         id: hotel._id,
         name: hotel.name,
+        verificationStatus: hotel.verificationStatus,
         isVerified: hotel.isVerified,
         verifiedAt: hotel.verifiedAt,
         verificationNotes: hotel.verificationNotes,
@@ -730,6 +872,8 @@ const getHotelStats = async (req, res) => {
   }
 };
 
+// Updated getAllHotels to include verification status in response
+// controllers/hotelAuthController.js - FIXED getAllHotels function
 const getAllHotels = async (req, res) => {
   try {
     const {
@@ -738,6 +882,7 @@ const getAllHotels = async (req, res) => {
       search = "",
       isActive = null,
       registeredByPolice = null,
+      verificationStatus = null,
     } = req.query;
 
     const filter = {};
@@ -758,7 +903,16 @@ const getAllHotels = async (req, res) => {
       filter.registeredByPolice = registeredByPolice === "true";
     }
 
+    if (verificationStatus !== null) {
+      filter.verificationStatus = verificationStatus;
+    }
+
     const skip = (page - 1) * limit;
+
+    // FIXED: Helper function to check if a value is a valid ObjectId
+    const isValidObjectId = (id) => {
+      return id && typeof id === "string" && /^[0-9a-fA-F]{24}$/.test(id);
+    };
 
     const [hotels, totalCount] = await Promise.all([
       Hotel.find(filter)
@@ -770,6 +924,75 @@ const getAllHotels = async (req, res) => {
       Hotel.countDocuments(filter),
     ]);
 
+    // FIXED: Post-process to handle mixed ID types and populate manually if needed
+    const processedHotels = hotels.map((hotel) => {
+      // Handle verifiedBy field
+      if (hotel.verifiedBy) {
+        if (!isValidObjectId(hotel.verifiedBy.toString())) {
+          // If it's not a valid ObjectId, it's probably a string ID
+          hotel.verifiedByInfo = hotel.policeOfficer || {
+            id: hotel.verifiedBy,
+            name: "Unknown Officer",
+            badgeNumber: "N/A",
+          };
+          hotel.verifiedBy = null; // Clear invalid ObjectId
+        }
+      }
+
+      // Handle registeredBy field
+      if (hotel.registeredBy) {
+        if (!isValidObjectId(hotel.registeredBy.toString())) {
+          // If it's not a valid ObjectId, use policeOfficer info
+          hotel.registeredByInfo = hotel.policeOfficer || {
+            id: hotel.registeredBy,
+            name: "Unknown Officer",
+            badgeNumber: "N/A",
+          };
+          hotel.registeredBy = null; // Clear invalid ObjectId
+        }
+      }
+
+      return hotel;
+    });
+
+    // FIXED: Now populate only valid ObjectIds
+    const hotelIds = processedHotels.map((h) => h._id);
+
+    // Get hotels with valid ObjectId references for population
+    const hotelsWithValidRefs = await Hotel.find({
+      _id: { $in: hotelIds },
+      $or: [
+        { verifiedBy: { $type: "objectId" } },
+        { registeredBy: { $type: "objectId" } },
+      ],
+    })
+      .populate("verifiedBy", "name badgeNumber station rank")
+      .populate("registeredBy", "name badgeNumber station rank")
+      .select("_id verifiedBy registeredBy")
+      .lean();
+
+    // Merge populated data back
+    const populatedMap = new Map();
+    hotelsWithValidRefs.forEach((hotel) => {
+      populatedMap.set(hotel._id.toString(), hotel);
+    });
+
+    const finalHotels = processedHotels.map((hotel) => {
+      const populated = populatedMap.get(hotel._id.toString());
+      if (populated) {
+        return {
+          ...hotel,
+          verifiedBy: populated.verifiedBy || hotel.verifiedByInfo,
+          registeredBy: populated.registeredBy || hotel.registeredByInfo,
+        };
+      }
+      return {
+        ...hotel,
+        verifiedBy: hotel.verifiedByInfo,
+        registeredBy: hotel.registeredByInfo,
+      };
+    });
+
     const totalPages = Math.ceil(totalCount / limit);
     const hasNextPage = page < totalPages;
     const hasPrevPage = page > 1;
@@ -777,7 +1000,7 @@ const getAllHotels = async (req, res) => {
     res.json({
       success: true,
       data: {
-        hotels,
+        hotels: finalHotels,
         pagination: {
           currentPage: parseInt(page),
           totalPages,
@@ -809,4 +1032,5 @@ module.exports = {
   getHotelStats,
   getAllHotels,
   verifyHotel,
+  updateVerificationStatus,
 };

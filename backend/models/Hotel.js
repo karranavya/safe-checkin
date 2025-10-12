@@ -126,6 +126,12 @@ const hotelSchema = new mongoose.Schema(
       default: false,
       index: true,
     },
+    verificationStatus: {
+      type: String,
+      enum: ["verified", "pending", "unverified"],
+      default: "pending",
+      index: true,
+    },
     verifiedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Police",
@@ -139,6 +145,31 @@ const hotelSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    verificationHistory: [
+      {
+        status: {
+          type: String,
+          enum: ["verified", "pending", "unverified"],
+          required: true,
+        },
+        changedBy: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Police",
+          required: true,
+        },
+        changedAt: {
+          type: Date,
+          default: Date.now,
+        },
+        notes: String,
+        officerInfo: {
+          name: String,
+          badgeNumber: String,
+          station: String,
+          rank: String,
+        },
+      },
+    ],
 
     // Status fields
     isActive: {
@@ -185,6 +216,7 @@ const hotelSchema = new mongoose.Schema(
 
 // Enhanced indexes
 hotelSchema.index({ isVerified: 1, isActive: 1 });
+hotelSchema.index({ verificationStatus: 1 });
 hotelSchema.index({ registeredBy: 1 });
 hotelSchema.index({ verifiedBy: 1 });
 hotelSchema.index({ "address.city": 1 });
@@ -201,6 +233,18 @@ hotelSchema.virtual("totalGuests").get(function () {
 
 hotelSchema.virtual("activeGuests").get(function () {
   return 0; // Implement actual calculation
+});
+// Pre-save middleware to sync isVerified with verificationStatus
+hotelSchema.pre("save", function (next) {
+  if (this.verificationStatus === "verified") {
+    this.isVerified = true;
+    if (!this.verifiedAt) {
+      this.verifiedAt = new Date();
+    }
+  } else {
+    this.isVerified = false;
+  }
+  next();
 });
 
 module.exports = mongoose.model("Hotel", hotelSchema);

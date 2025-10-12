@@ -1,4 +1,4 @@
-// src/pages/HotelRegistration.tsx - UPDATED VERSION
+// src/pages/HotelRegistration.tsx - UPDATED VERSION WITH VERIFICATION STATUS
 import React, { useState, useEffect } from "react";
 import {
   Building,
@@ -13,6 +13,9 @@ import {
   FileText,
   CreditCard,
   MapIcon,
+  Shield,
+  Clock,
+  X,
 } from "lucide-react";
 
 interface RegisterFormData {
@@ -35,6 +38,8 @@ interface RegisterFormData {
   gstNumber: string;
   labourLicenceNumber: string;
   hotelLicenceNumber: string;
+  verificationStatus: "verified" | "pending" | "unverified";
+  verificationNotes: string;
 }
 
 interface MessageState {
@@ -82,6 +87,8 @@ const HotelRegistration: React.FC = () => {
     gstNumber: "",
     labourLicenceNumber: "",
     hotelLicenceNumber: "",
+    verificationStatus: "pending",
+    verificationNotes: "",
   });
 
   // Indian states for dropdown
@@ -117,6 +124,36 @@ const HotelRegistration: React.FC = () => {
     "Delhi",
     "Jammu and Kashmir",
     "Ladakh",
+  ];
+
+  const verificationStatusOptions = [
+    {
+      value: "verified",
+      label: "Verified",
+      icon: CheckCircle,
+      color: "text-green-600",
+      bgColor: "bg-green-50",
+      borderColor: "border-green-200",
+      description: "All documents verified and approved",
+    },
+    {
+      value: "pending",
+      label: "Pending Verification",
+      icon: Clock,
+      color: "text-yellow-600",
+      bgColor: "bg-yellow-50",
+      borderColor: "border-yellow-200",
+      description: "Documents under review, verification pending",
+    },
+    {
+      value: "unverified",
+      label: "Unverified",
+      icon: X,
+      color: "text-red-600",
+      bgColor: "bg-red-50",
+      borderColor: "border-red-200",
+      description: "Documents not verified or issues found",
+    },
   ];
 
   useEffect(() => {
@@ -257,6 +294,8 @@ const HotelRegistration: React.FC = () => {
       gstNumber,
       labourLicenceNumber,
       hotelLicenceNumber,
+      verificationStatus,
+      verificationNotes,
     } = registerForm;
 
     // Required field validation
@@ -276,7 +315,8 @@ const HotelRegistration: React.FC = () => {
       !address.zipCode ||
       !gstNumber ||
       !labourLicenceNumber ||
-      !hotelLicenceNumber
+      !hotelLicenceNumber ||
+      !verificationStatus
     ) {
       setMessage({ type: "error", text: "Please fill in all required fields" });
       setLoading(false);
@@ -369,6 +409,13 @@ const HotelRegistration: React.FC = () => {
             },
             numberOfRooms: parseInt(numberOfRooms),
             registeredByPolice: true,
+            isVerified: verificationStatus === "verified",
+            verificationStatus: verificationStatus,
+            verificationNotes: verificationNotes || undefined,
+            verifiedAt:
+              verificationStatus === "verified"
+                ? new Date().toISOString()
+                : undefined,
             policeOfficerId: policeAuth.policeId || policeAuth.officerId,
             policeOfficerInfo: {
               id: policeAuth.policeId || policeAuth.officerId,
@@ -386,7 +433,7 @@ const HotelRegistration: React.FC = () => {
       if (response.ok) {
         setMessage({
           type: "success",
-          text: "Hotel registered successfully!",
+          text: `Hotel registered successfully with ${verificationStatus} status!`,
         });
         // Reset form
         setRegisterForm({
@@ -409,6 +456,8 @@ const HotelRegistration: React.FC = () => {
           gstNumber: "",
           labourLicenceNumber: "",
           hotelLicenceNumber: "",
+          verificationStatus: "pending",
+          verificationNotes: "",
         });
         setCurrentStep(1);
       } else {
@@ -426,7 +475,7 @@ const HotelRegistration: React.FC = () => {
   };
 
   const nextStep = () => {
-    if (currentStep < 4) setCurrentStep(currentStep + 1);
+    if (currentStep < 5) setCurrentStep(currentStep + 1);
   };
 
   const prevStep = () => {
@@ -442,17 +491,17 @@ const HotelRegistration: React.FC = () => {
           </h1>
           <p className="text-gray-600">
             Complete registration for accommodation facility with all required
-            documentation
+            documentation and verification status
           </p>
         </div>
 
         {/* Progress Steps */}
         <div className="mb-8">
           <div className="flex justify-between items-center">
-            {[1, 2, 3, 4].map((step) => (
+            {[1, 2, 3, 4, 5].map((step) => (
               <div
                 key={step}
-                className={`flex items-center ${step < 4 ? "flex-1" : ""}`}
+                className={`flex items-center ${step < 5 ? "flex-1" : ""}`}
               >
                 <div
                   className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
@@ -463,7 +512,7 @@ const HotelRegistration: React.FC = () => {
                 >
                   {step}
                 </div>
-                {step < 4 && (
+                {step < 5 && (
                   <div
                     className={`flex-1 h-1 mx-2 ${
                       currentStep > step ? "bg-blue-600" : "bg-gray-200"
@@ -477,6 +526,7 @@ const HotelRegistration: React.FC = () => {
             <span>Basic Info</span>
             <span>Address</span>
             <span>Legal Docs</span>
+            <span>Verification</span>
             <span>Review</span>
           </div>
         </div>
@@ -876,8 +926,112 @@ const HotelRegistration: React.FC = () => {
             </div>
           )}
 
-          {/* Step 4: Review */}
+          {/* Step 4: Verification Status */}
           {currentStep === 4 && (
+            <div className="space-y-6">
+              <h2 className="text-xl font-semibold text-gray-900 mb-4 flex items-center">
+                <Shield className="w-6 h-6 mr-2 text-blue-600" />
+                Verification Status
+              </h2>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-3">
+                    Select Verification Status *
+                  </label>
+                  <div className="space-y-3">
+                    {verificationStatusOptions.map((option) => {
+                      const IconComponent = option.icon;
+                      return (
+                        <div
+                          key={option.value}
+                          className={`relative border rounded-lg p-4 cursor-pointer transition-all ${
+                            registerForm.verificationStatus === option.value
+                              ? `${option.borderColor} ${option.bgColor} ring-2 ring-opacity-20`
+                              : "border-gray-200 hover:border-gray-300"
+                          }`}
+                          onClick={() =>
+                            setRegisterForm({
+                              ...registerForm,
+                              verificationStatus: option.value as
+                                | "verified"
+                                | "pending"
+                                | "unverified",
+                            })
+                          }
+                        >
+                          <div className="flex items-start">
+                            <input
+                              type="radio"
+                              name="verificationStatus"
+                              value={option.value}
+                              checked={
+                                registerForm.verificationStatus === option.value
+                              }
+                              onChange={handleRegisterChange}
+                              className="mt-1 mr-3"
+                              disabled={loading}
+                            />
+                            <div className="flex-1">
+                              <div className="flex items-center mb-1">
+                                <IconComponent
+                                  className={`w-5 h-5 mr-2 ${option.color}`}
+                                />
+                                <span className="font-medium text-gray-900">
+                                  {option.label}
+                                </span>
+                              </div>
+                              <p className="text-sm text-gray-600">
+                                {option.description}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Verification Notes (Optional)
+                  </label>
+                  <textarea
+                    name="verificationNotes"
+                    value={registerForm.verificationNotes}
+                    onChange={handleRegisterChange}
+                    rows={4}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                    placeholder="Add any notes about the verification process, document issues, or special requirements..."
+                    disabled={loading}
+                  />
+                </div>
+
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                  <h3 className="font-medium text-yellow-900 mb-2">
+                    Verification Guidelines
+                  </h3>
+                  <ul className="text-sm text-yellow-800 space-y-1">
+                    <li>
+                      • <strong>Verified:</strong> All documents checked and
+                      approved for operation
+                    </li>
+                    <li>
+                      • <strong>Pending:</strong> Documents submitted, awaiting
+                      review or missing items
+                    </li>
+                    <li>
+                      • <strong>Unverified:</strong> Documents not submitted or
+                      issues found requiring correction
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Step 5: Review */}
+          {currentStep === 5 && (
             <div className="space-y-6">
               <h2 className="text-xl font-semibold text-gray-900 mb-4">
                 Review Registration Details
@@ -944,6 +1098,39 @@ const HotelRegistration: React.FC = () => {
                     </div>
                   </div>
                 </div>
+
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <h3 className="font-medium text-gray-900 mb-2">
+                    Verification Status
+                  </h3>
+                  <div className="flex items-center mb-2">
+                    {(() => {
+                      const statusOption = verificationStatusOptions.find(
+                        (opt) => opt.value === registerForm.verificationStatus
+                      );
+                      const IconComponent = statusOption?.icon || Shield;
+                      return (
+                        <>
+                          <IconComponent
+                            className={`w-5 h-5 mr-2 ${
+                              statusOption?.color || "text-gray-600"
+                            }`}
+                          />
+                          <span className="font-medium">
+                            {statusOption?.label ||
+                              registerForm.verificationStatus}
+                          </span>
+                        </>
+                      );
+                    })()}
+                  </div>
+                  {registerForm.verificationNotes && (
+                    <div className="text-sm text-gray-600">
+                      <span className="font-medium">Notes:</span>{" "}
+                      {registerForm.verificationNotes}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -959,7 +1146,7 @@ const HotelRegistration: React.FC = () => {
             </button>
 
             <div className="flex space-x-3">
-              {currentStep < 4 ? (
+              {currentStep < 5 ? (
                 <button
                   onClick={nextStep}
                   disabled={loading}

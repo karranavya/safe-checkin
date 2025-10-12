@@ -1,4 +1,4 @@
-// src/components/Dashboard/HotelList.tsx
+// src/components/Dashboard/HotelList.tsx - UPDATED with Phone Number Update Feature
 import React, { useState, useEffect } from "react";
 import {
   Building,
@@ -16,9 +16,15 @@ import {
   CreditCard,
   X,
   Building2,
+  Shield,
+  Clock,
+  AlertCircle,
+  Edit,
+  Save,
+  RefreshCw,
 } from "lucide-react";
 
-// Updated interface to match new schema
+// Updated interface to match new schema with verification status
 interface Hotel {
   _id: string;
   name: string;
@@ -41,6 +47,7 @@ interface Hotel {
   hotelLicenceNumber: string;
   isActive: boolean;
   isVerified?: boolean;
+  verificationStatus: "verified" | "pending" | "unverified";
   registrationDate: string;
   registeredByPolice?: boolean;
   verifiedAt?: string;
@@ -77,13 +84,164 @@ interface HotelsResponse {
   };
 }
 
-// Modal component for viewing hotel details
+// Updated helper function to get verification status info
+const getVerificationStatusInfo = (hotel: Hotel) => {
+  const status = hotel.verificationStatus || "pending";
+
+  const statusConfig = {
+    verified: {
+      label: "Verified",
+      color: "bg-green-100 text-green-800",
+      icon: Shield,
+    },
+    pending: {
+      label: "Pending",
+      color: "bg-yellow-100 text-yellow-800",
+      icon: Clock,
+    },
+    unverified: {
+      label: "Unverified",
+      color: "bg-red-100 text-red-800",
+      icon: AlertCircle,
+    },
+  };
+
+  return {
+    status,
+    ...statusConfig[status],
+    isVerified: status === "verified",
+  };
+};
+
+// Modal component for viewing hotel details with status and phone update
 const HotelDetailsModal: React.FC<{
   hotel: Hotel;
   isOpen: boolean;
   onClose: () => void;
-}> = ({ hotel, isOpen, onClose }) => {
+  onHotelUpdate: (hotelId: string, updates: any) => Promise<void>;
+}> = ({ hotel, isOpen, onClose, onHotelUpdate }) => {
+  const [isEditingStatus, setIsEditingStatus] = useState(false);
+  const [isEditingOwner, setIsEditingOwner] = useState(false);
+  const [selectedStatus, setSelectedStatus] = useState(
+    hotel.verificationStatus
+  );
+  const [statusNotes, setStatusNotes] = useState(hotel.verificationNotes || "");
+  const [ownerName, setOwnerName] = useState(hotel.ownerName);
+  const [ownerPhone, setOwnerPhone] = useState(hotel.ownerPhone);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [updateError, setUpdateError] = useState("");
+
   if (!isOpen) return null;
+
+  const verificationInfo = getVerificationStatusInfo(hotel);
+  const StatusIcon = verificationInfo.icon;
+
+  const statusOptions = [
+    {
+      value: "verified",
+      label: "Verified",
+      color: "bg-green-100 text-green-800",
+      icon: Shield,
+      description: "All documents verified and approved",
+    },
+    {
+      value: "pending",
+      label: "Pending Verification",
+      color: "bg-yellow-100 text-yellow-800",
+      icon: Clock,
+      description: "Documents under review, verification pending",
+    },
+    {
+      value: "unverified",
+      label: "Unverified",
+      color: "bg-red-100 text-red-800",
+      icon: AlertCircle,
+      description: "Documents not verified or issues found",
+    },
+  ];
+
+  const validatePhone = (phone: string): boolean => {
+    return /^[0-9]{10}$/.test(phone.replace(/\D/g, ""));
+  };
+
+  const handleStatusUpdate = async () => {
+    if (
+      selectedStatus === hotel.verificationStatus &&
+      statusNotes === (hotel.verificationNotes || "")
+    ) {
+      setIsEditingStatus(false);
+      return;
+    }
+
+    setIsUpdating(true);
+    setUpdateError("");
+
+    try {
+      await onHotelUpdate(hotel._id, {
+        type: "status",
+        verificationStatus: selectedStatus,
+        verificationNotes: statusNotes,
+      });
+      setIsEditingStatus(false);
+    } catch (error) {
+      setUpdateError(
+        error instanceof Error ? error.message : "Failed to update status"
+      );
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const handleOwnerUpdate = async () => {
+    if (ownerName === hotel.ownerName && ownerPhone === hotel.ownerPhone) {
+      setIsEditingOwner(false);
+      return;
+    }
+
+    if (!ownerName.trim()) {
+      setUpdateError("Owner name is required");
+      return;
+    }
+
+    if (!validatePhone(ownerPhone)) {
+      setUpdateError("Please enter a valid 10-digit phone number");
+      return;
+    }
+
+    setIsUpdating(true);
+    setUpdateError("");
+
+    try {
+      await onHotelUpdate(hotel._id, {
+        type: "owner",
+        ownerName: ownerName.trim(),
+        ownerPhone: ownerPhone.trim(),
+      });
+      setIsEditingOwner(false);
+    } catch (error) {
+      setUpdateError(
+        error instanceof Error
+          ? error.message
+          : "Failed to update owner information"
+      );
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const handleStatusCancel = () => {
+    setSelectedStatus(hotel.verificationStatus);
+    setStatusNotes(hotel.verificationNotes || "");
+    setIsEditingStatus(false);
+    setUpdateError("");
+  };
+
+  const handleOwnerCancel = () => {
+    setOwnerName(hotel.ownerName);
+    setOwnerPhone(hotel.ownerPhone);
+    setIsEditingOwner(false);
+    setUpdateError("");
+  };
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -111,6 +269,19 @@ const HotelDetailsModal: React.FC<{
 
         {/* Modal Content */}
         <div className="p-6 space-y-6">
+          {/* Update Error */}
+          {updateError && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center justify-between">
+              <span>{updateError}</span>
+              <button
+                onClick={() => setUpdateError("")}
+                className="text-red-500 hover:text-red-700"
+              >
+                ×
+              </button>
+            </div>
+          )}
+
           {/* Basic Information */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="bg-gray-50 rounded-lg p-4">
@@ -152,23 +323,105 @@ const HotelDetailsModal: React.FC<{
               </div>
             </div>
 
+            {/* UPDATED: Owner Information with Edit Capability */}
             <div className="bg-gray-50 rounded-lg p-4">
-              <h3 className="font-semibold text-gray-900 mb-3 flex items-center">
-                <User className="w-4 h-4 mr-2" />
-                Owner Information
-              </h3>
-              <div className="space-y-2 text-sm">
-                <div>
-                  <span className="font-medium">Name:</span> {hotel.ownerName}
-                </div>
-                <div>
-                  <span className="font-medium">Phone:</span> {hotel.ownerPhone}
-                </div>
-                <div>
-                  <span className="font-medium">Aadhar:</span>{" "}
-                  {hotel.ownerAadharNumber}
-                </div>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold text-gray-900 flex items-center">
+                  <User className="w-4 h-4 mr-2" />
+                  Owner Information
+                </h3>
+                {!isEditingOwner && (
+                  <button
+                    onClick={() => setIsEditingOwner(true)}
+                    className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                    title="Update Owner Info"
+                  >
+                    <Edit className="w-4 h-4" />
+                  </button>
+                )}
               </div>
+
+              {!isEditingOwner ? (
+                // Display Mode
+                <div className="space-y-2 text-sm">
+                  <div>
+                    <span className="font-medium">Name:</span> {hotel.ownerName}
+                  </div>
+                  <div>
+                    <span className="font-medium">Phone:</span>{" "}
+                    {hotel.ownerPhone}
+                  </div>
+                  <div>
+                    <span className="font-medium">Aadhar:</span>{" "}
+                    {hotel.ownerAadharNumber}
+                  </div>
+                </div>
+              ) : (
+                // Edit Mode
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Owner Name
+                    </label>
+                    <input
+                      type="text"
+                      value={ownerName}
+                      onChange={(e) => setOwnerName(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                      placeholder="Enter owner name"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Phone Number
+                    </label>
+                    <input
+                      type="tel"
+                      value={ownerPhone}
+                      onChange={(e) => setOwnerPhone(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                      placeholder="10-digit phone number"
+                      maxLength={10}
+                    />
+                  </div>
+
+                  <div>
+                    <span className="text-sm text-gray-600">
+                      <span className="font-medium">Aadhar:</span>{" "}
+                      {hotel.ownerAadharNumber} (cannot be changed)
+                    </span>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex items-center space-x-3 pt-2">
+                    <button
+                      onClick={handleOwnerUpdate}
+                      disabled={isUpdating}
+                      className="flex items-center px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
+                    >
+                      {isUpdating ? (
+                        <>
+                          <RefreshCw className="w-3 h-3 mr-1 animate-spin" />
+                          Updating...
+                        </>
+                      ) : (
+                        <>
+                          <Save className="w-3 h-3 mr-1" />
+                          Update
+                        </>
+                      )}
+                    </button>
+                    <button
+                      onClick={handleOwnerCancel}
+                      disabled={isUpdating}
+                      className="px-3 py-1.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors text-sm"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -276,37 +529,172 @@ const HotelDetailsModal: React.FC<{
               </div>
             </div>
 
+            {/* Verification Status Section (same as before) */}
             <div className="bg-gray-50 rounded-lg p-4">
-              <h3 className="font-semibold text-gray-900 mb-3 flex items-center">
-                <CreditCard className="w-4 h-4 mr-2" />
-                Verification Status
-              </h3>
-              <div className="space-y-2 text-sm">
-                <div>
-                  <span className="font-medium">Verified:</span>
-                  <span
-                    className={`ml-2 px-2 py-1 rounded-full text-xs ${
-                      hotel.isVerified
-                        ? "bg-green-100 text-green-800"
-                        : "bg-yellow-100 text-yellow-800"
-                    }`}
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold text-gray-900 flex items-center">
+                  <CreditCard className="w-4 h-4 mr-2" />
+                  Verification Status
+                </h3>
+                {!isEditingStatus && (
+                  <button
+                    onClick={() => setIsEditingStatus(true)}
+                    className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                    title="Update Status"
                   >
-                    {hotel.isVerified ? "Verified" : "Pending"}
-                  </span>
-                </div>
-                {hotel.verifiedAt && (
-                  <div>
-                    <span className="font-medium">Verified At:</span>{" "}
-                    {new Date(hotel.verifiedAt).toLocaleDateString("en-IN")}
-                  </div>
-                )}
-                {hotel.verificationNotes && (
-                  <div>
-                    <span className="font-medium">Notes:</span>{" "}
-                    {hotel.verificationNotes}
-                  </div>
+                    <Edit className="w-4 h-4" />
+                  </button>
                 )}
               </div>
+
+              {!isEditingStatus ? (
+                // Display Mode
+                <div className="space-y-2 text-sm">
+                  <div className="flex items-center">
+                    <span className="font-medium">Status:</span>
+                    <div className="ml-2 flex items-center">
+                      <StatusIcon className="w-4 h-4 mr-1" />
+                      <span
+                        className={`px-2 py-1 rounded-full text-xs ${verificationInfo.color}`}
+                      >
+                        {verificationInfo.label}
+                      </span>
+                    </div>
+                  </div>
+                  {hotel.registeredByPolice && (
+                    <div>
+                      <span className="font-medium">Registration Type:</span>
+                      <span className="ml-2 px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-800">
+                        Police Registered
+                      </span>
+                    </div>
+                  )}
+                  {hotel.verifiedAt && (
+                    <div>
+                      <span className="font-medium">Verified At:</span>{" "}
+                      {new Date(hotel.verifiedAt).toLocaleDateString("en-IN")}
+                    </div>
+                  )}
+                  {hotel.verificationNotes && (
+                    <div>
+                      <span className="font-medium">Notes:</span>{" "}
+                      <span className="text-gray-600">
+                        {hotel.verificationNotes}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                // Edit Mode (same as before)
+                <div className="space-y-4">
+                  {/* Status Selection */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Update Verification Status
+                    </label>
+                    <div className="space-y-2">
+                      {statusOptions.map((option) => {
+                        const OptionIcon = option.icon;
+                        return (
+                          <div
+                            key={option.value}
+                            className={`relative border rounded-lg p-3 cursor-pointer transition-all ${
+                              selectedStatus === option.value
+                                ? `${option.color} ring-2 ring-opacity-20 border-transparent`
+                                : "border-gray-200 hover:border-gray-300"
+                            }`}
+                            onClick={() =>
+                              setSelectedStatus(
+                                option.value as
+                                  | "verified"
+                                  | "pending"
+                                  | "unverified"
+                              )
+                            }
+                          >
+                            <div className="flex items-start">
+                              <input
+                                type="radio"
+                                name="verificationStatus"
+                                value={option.value}
+                                checked={selectedStatus === option.value}
+                                onChange={() =>
+                                  setSelectedStatus(
+                                    option.value as
+                                      | "verified"
+                                      | "pending"
+                                      | "unverified"
+                                  )
+                                }
+                                className="mt-1 mr-3"
+                              />
+                              <div className="flex-1">
+                                <div className="flex items-center mb-1">
+                                  <OptionIcon
+                                    className={`w-4 h-4 mr-2 ${
+                                      selectedStatus === option.value
+                                        ? ""
+                                        : "text-gray-400"
+                                    }`}
+                                  />
+                                  <span className="font-medium text-sm">
+                                    {option.label}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-gray-600">
+                                  {option.description}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Notes */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Verification Notes (Optional)
+                    </label>
+                    <textarea
+                      value={statusNotes}
+                      onChange={(e) => setStatusNotes(e.target.value)}
+                      rows={3}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none text-sm"
+                      placeholder="Add notes about the verification decision..."
+                    />
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex items-center space-x-3 pt-2">
+                    <button
+                      onClick={handleStatusUpdate}
+                      disabled={isUpdating}
+                      className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
+                    >
+                      {isUpdating ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                          Updating...
+                        </>
+                      ) : (
+                        <>
+                          <Save className="w-4 h-4 mr-2" />
+                          Update Status
+                        </>
+                      )}
+                    </button>
+                    <button
+                      onClick={handleStatusCancel}
+                      disabled={isUpdating}
+                      className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors text-sm"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -385,6 +773,102 @@ const HotelList: React.FC = () => {
     isActive: "",
     registeredByPolice: "true",
   });
+
+  // UPDATED: Handle both status and owner info updates
+  const handleHotelUpdate = async (hotelId: string, updates: any) => {
+    try {
+      const token =
+        sessionStorage.getItem("policeToken") ||
+        localStorage.getItem("policeToken");
+
+      if (!token) {
+        throw new Error("Authentication required. Please login again.");
+      }
+
+      let endpoint = "";
+      let payload = {};
+
+      if (updates.type === "status") {
+        endpoint = `http://localhost:5000/api/hotels/${hotelId}/verification-status`;
+        payload = {
+          verificationStatus: updates.verificationStatus,
+          verificationNotes: updates.verificationNotes,
+        };
+      } else if (updates.type === "owner") {
+        endpoint = `http://localhost:5000/api/hotels/${hotelId}/owner-info`;
+        payload = {
+          ownerName: updates.ownerName,
+          ownerPhone: updates.ownerPhone,
+        };
+      }
+
+      const response = await fetch(endpoint, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `Failed to update ${updates.type}`);
+      }
+
+      // Update the hotel in the local state
+      setHotels((prevHotels) =>
+        prevHotels.map((hotel) =>
+          hotel._id === hotelId
+            ? {
+                ...hotel,
+                ...(updates.type === "status" && {
+                  verificationStatus: updates.verificationStatus,
+                  verificationNotes: updates.verificationNotes,
+                  verifiedAt:
+                    updates.verificationStatus === "verified"
+                      ? new Date().toISOString()
+                      : hotel.verifiedAt,
+                  isVerified: updates.verificationStatus === "verified",
+                }),
+                ...(updates.type === "owner" && {
+                  ownerName: updates.ownerName,
+                  ownerPhone: updates.ownerPhone,
+                }),
+              }
+            : hotel
+        )
+      );
+
+      // Update selected hotel if it's the one being updated
+      if (selectedHotel && selectedHotel._id === hotelId) {
+        setSelectedHotel((prev) =>
+          prev
+            ? {
+                ...prev,
+                ...(updates.type === "status" && {
+                  verificationStatus: updates.verificationStatus,
+                  verificationNotes: updates.verificationNotes,
+                  verifiedAt:
+                    updates.verificationStatus === "verified"
+                      ? new Date().toISOString()
+                      : prev.verifiedAt,
+                  isVerified: updates.verificationStatus === "verified",
+                }),
+                ...(updates.type === "owner" && {
+                  ownerName: updates.ownerName,
+                  ownerPhone: updates.ownerPhone,
+                }),
+              }
+            : null
+        );
+      }
+    } catch (error) {
+      throw error;
+    }
+  };
+
+  // ... (keep all existing functions the same: fetchHotels, handleSearch, etc.)
 
   // Fetch hotels
   const fetchHotels = async (page = 1, search = "", filterParams = filters) => {
@@ -617,129 +1101,137 @@ const HotelList: React.FC = () => {
 
               {/* Table Body */}
               <div className="divide-y divide-gray-200">
-                {hotels.map((hotel) => (
-                  <div
-                    key={hotel._id}
-                    className="grid grid-cols-12 gap-4 p-4 hover:bg-gray-50 transition-colors"
-                  >
-                    {/* Hotel Details */}
-                    <div className="col-span-3">
-                      <div className="flex items-start space-x-3">
-                        <div className="flex-shrink-0">
-                          <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                            <Building className="w-5 h-5 text-blue-600" />
+                {hotels.map((hotel) => {
+                  const verificationInfo = getVerificationStatusInfo(hotel);
+                  const StatusIcon = verificationInfo.icon;
+
+                  return (
+                    <div
+                      key={hotel._id}
+                      className="grid grid-cols-12 gap-4 p-4 hover:bg-gray-50 transition-colors"
+                    >
+                      {/* Hotel Details */}
+                      <div className="col-span-3">
+                        <div className="flex items-start space-x-3">
+                          <div className="flex-shrink-0">
+                            <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                              <Building className="w-5 h-5 text-blue-600" />
+                            </div>
                           </div>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <h3 className="font-semibold text-gray-900 truncate">
-                            {hotel.name}
-                          </h3>
-                          <p className="text-sm text-gray-500 truncate">
-                            {hotel.accommodationType}
-                          </p>
-                          <p className="text-xs text-gray-400 mt-1 truncate">
-                            {formatAddress(hotel.address)}
-                          </p>
-                          <div className="flex items-center mt-1">
-                            <span
-                              className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                                hotel.isActive
-                                  ? "bg-green-100 text-green-800"
-                                  : "bg-red-100 text-red-800"
-                              }`}
-                            >
-                              {hotel.isActive ? "Active" : "Inactive"}
-                            </span>
-                            {hotel.isVerified && (
-                              <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 ml-2">
-                                Verified
+                          <div className="flex-1 min-w-0">
+                            <h3 className="font-semibold text-gray-900 truncate">
+                              {hotel.name}
+                            </h3>
+                            <p className="text-sm text-gray-500 truncate">
+                              {hotel.accommodationType}
+                            </p>
+                            <p className="text-xs text-gray-400 mt-1 truncate">
+                              {formatAddress(hotel.address)}
+                            </p>
+                            <div className="flex items-center mt-1 flex-wrap gap-1">
+                              <span
+                                className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                                  hotel.isActive
+                                    ? "bg-green-100 text-green-800"
+                                    : "bg-red-100 text-red-800"
+                                }`}
+                              >
+                                {hotel.isActive ? "Active" : "Inactive"}
                               </span>
-                            )}
+                              <span
+                                className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${verificationInfo.color}`}
+                              >
+                                <StatusIcon className="w-3 h-3 mr-1" />
+                                {verificationInfo.label}
+                              </span>
+                            </div>
                           </div>
                         </div>
                       </div>
-                    </div>
 
-                    {/* Owner Info */}
-                    <div className="col-span-2">
-                      <div className="flex items-center space-x-2">
-                        <User className="w-4 h-4 text-gray-400" />
-                        <div>
-                          <span className="text-sm text-gray-900 block">
-                            {hotel.ownerName}
-                          </span>
-                          <span className="text-xs text-gray-500">
-                            {hotel.ownerAadharNumber}
-                          </span>
+                      {/* Owner Info */}
+                      <div className="col-span-2">
+                        <div className="flex items-center space-x-2">
+                          <User className="w-4 h-4 text-gray-400" />
+                          <div>
+                            <span className="text-sm text-gray-900 block">
+                              {hotel.ownerName}
+                            </span>
+                            <span className="text-xs text-gray-500">
+                              {hotel.ownerAadharNumber}
+                            </span>
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    {/* Contact */}
-                    <div className="col-span-2">
-                      <div className="space-y-1">
-                        <div className="flex items-center space-x-2">
-                          <Phone className="w-4 h-4 text-gray-400" />
+                      {/* Contact */}
+                      <div className="col-span-2">
+                        <div className="space-y-1">
+                          <div className="flex items-center space-x-2">
+                            <Phone className="w-4 h-4 text-gray-400" />
+                            <span className="text-sm text-gray-900">
+                              {hotel.ownerPhone}
+                            </span>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <Mail className="w-4 h-4 text-gray-400" />
+                            <span className="text-xs text-gray-500 truncate">
+                              {hotel.email}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Capacity */}
+                      <div className="col-span-2">
+                        <div className="space-y-1">
+                          <div className="flex items-center space-x-2">
+                            <Bed className="w-4 h-4 text-gray-400" />
+                            <span className="text-sm text-gray-900">
+                              {hotel.numberOfRooms} rooms
+                            </span>
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            GST: {hotel.gstNumber}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Registration */}
+                      <div className="col-span-2">
+                        <div className="flex items-center space-x-2 mb-1">
+                          <Calendar className="w-4 h-4 text-gray-400" />
                           <span className="text-sm text-gray-900">
-                            {hotel.ownerPhone}
+                            {formatDate(hotel.registrationDate)}
                           </span>
                         </div>
-                        <div className="flex items-center space-x-2">
-                          <Mail className="w-4 h-4 text-gray-400" />
-                          <span className="text-xs text-gray-500 truncate">
-                            {hotel.email}
-                          </span>
+                        <div className="flex flex-wrap gap-1 mb-1">
+                          {hotel.registeredByPolice && (
+                            <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                              Police Registered
+                            </span>
+                          )}
                         </div>
+                        {hotel.policeOfficer?.name && (
+                          <p className="text-xs text-gray-500">
+                            By: {hotel.policeOfficer.name}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Actions */}
+                      <div className="col-span-1">
+                        <button
+                          onClick={() => handleViewHotel(hotel)}
+                          className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          title="View Details & Update Info"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </button>
                       </div>
                     </div>
-
-                    {/* Capacity */}
-                    <div className="col-span-2">
-                      <div className="space-y-1">
-                        <div className="flex items-center space-x-2">
-                          <Bed className="w-4 h-4 text-gray-400" />
-                          <span className="text-sm text-gray-900">
-                            {hotel.numberOfRooms} rooms
-                          </span>
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          GST: {hotel.gstNumber}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Registration */}
-                    <div className="col-span-2">
-                      <div className="flex items-center space-x-2 mb-1">
-                        <Calendar className="w-4 h-4 text-gray-400" />
-                        <span className="text-sm text-gray-900">
-                          {formatDate(hotel.registrationDate)}
-                        </span>
-                      </div>
-                      {hotel.registeredByPolice && (
-                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                          Police Registered
-                        </span>
-                      )}
-                      {hotel.policeOfficer?.name && (
-                        <p className="text-xs text-gray-500 mt-1">
-                          By: {hotel.policeOfficer.name}
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Actions */}
-                    <div className="col-span-1">
-                      <button
-                        onClick={() => handleViewHotel(hotel)}
-                        className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                        title="View Details"
-                      >
-                        <Eye className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </>
           )}
@@ -781,7 +1273,7 @@ const HotelList: React.FC = () => {
           )}
         </div>
 
-        {/* Hotel Details Modal */}
+        {/* Hotel Details Modal with Update Capabilities */}
         {selectedHotel && (
           <HotelDetailsModal
             hotel={selectedHotel}
@@ -790,6 +1282,7 @@ const HotelList: React.FC = () => {
               setShowModal(false);
               setSelectedHotel(null);
             }}
+            onHotelUpdate={handleHotelUpdate}
           />
         )}
       </div>
