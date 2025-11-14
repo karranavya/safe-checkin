@@ -447,6 +447,100 @@ const authHealthCheck = (req, res, next) => {
   next();
 };
 
+const authenticateHotel = (req, res, next) => {
+  try {
+    const token = req.headers.authorization?.split(" ")[1];
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        error: "No authentication token provided",
+      });
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    if (!["hotel_staff", "hotel_manager"].includes(decoded.role)) {
+      return res.status(403).json({
+        success: false,
+        error: "Access denied. Hotel role required.",
+      });
+    }
+
+    req.user = decoded;
+    req.hotelId = decoded.hotelId;
+
+    next();
+  } catch (error) {
+    console.error("Hotel auth error:", error);
+    res.status(401).json({
+      success: false,
+      error: "Invalid or expired token",
+    });
+  }
+};
+
+const authenticatePolice = (req, res, next) => {
+  try {
+    const token = req.headers.authorization?.split(" ")[1];
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        error: "No authentication token provided",
+      });
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    if (!["police", "admin_police"].includes(decoded.role)) {
+      return res.status(403).json({
+        success: false,
+        error: "Access denied. Police role required.",
+      });
+    }
+
+    req.user = decoded;
+    req.user.policeId = decoded._id || decoded.id;
+    req.user.policeRole = decoded.role;
+
+    next();
+  } catch (error) {
+    console.error("Police auth error:", error);
+    res.status(401).json({
+      success: false,
+      error: "Invalid or expired token",
+    });
+  }
+};
+
+const authenticateBoth = (req, res, next) => {
+  try {
+    const token = req.headers.authorization?.split(" ")[1];
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        error: "No authentication token provided",
+      });
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    req.user = decoded;
+    req.hotelId = decoded.hotelId;
+    req.policeId = decoded._id || decoded.id;
+
+    next();
+  } catch (error) {
+    console.error("Auth error:", error);
+    res.status(401).json({
+      success: false,
+      error: "Invalid or expired token",
+    });
+  }
+};
+
 module.exports = {
   auth,
   rateLimiter,
@@ -454,4 +548,7 @@ module.exports = {
   logHotelActivity,
   requireAuth,
   authHealthCheck,
+  authenticateHotel,
+  authenticatePolice,
+  authenticateBoth,
 };

@@ -1,3 +1,4 @@
+// GuestTable.tsx - COMPLETE with working dropdown menus
 import { useState } from "react";
 import {
   Eye,
@@ -7,6 +8,8 @@ import {
   MoreHorizontal,
   UserCheck,
   UserX,
+  Edit,
+  AlertTriangle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -24,10 +27,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-
-// ... [imports unchanged]
 
 export interface Guest {
   id: string;
@@ -38,40 +40,63 @@ export interface Guest {
   nationality?: string;
   roomNumber?: string;
   checkInDate: string;
-  checkInTime?: string; // Added from schema
+  checkInTime?: string;
   checkOutDate?: string;
-  status: "checked-in" | "checked-out" | "pending" | "reported"; // Added "reported" from schema
+  status: "checked-in" | "checked-out" | "pending" | "reported" | "flagged";
   purposeOfVisit?: string;
-  purpose?: string; // From schema
+  purpose?: string;
   referenceNumber?: string;
   totalGuests?: number;
-  guestCount?: number; // From schema
-  maleGuests?: number; // From schema
-  femaleGuests?: number; // From schema
-  childGuests?: number; // From schema
-  bookingWebsite?: string; // From schema
-  bookingMode?: "Direct" | "Online" | "Travel Agent"; // From schema with exact enum values
+  guestCount?: number;
+  maleGuests?: number;
+  femaleGuests?: number;
+  childGuests?: number;
+  bookingWebsite?: string;
+  bookingMode?: "Direct" | "Online" | "Travel Agent";
+  isFlagged?: boolean;
+  // Updated photo interface for file paths
+  photos?: {
+    guestPhoto?: {
+      path?: string;
+      filename?: string;
+      originalName?: string;
+    };
+    idFront?: {
+      path?: string;
+      filename?: string;
+      originalName?: string;
+    };
+    idBack?: {
+      path?: string;
+      filename?: string;
+      originalName?: string;
+    };
+  };
 }
 
 interface GuestTableProps {
   guests: Guest[];
   onViewGuest: (guest: Guest) => void;
   onCheckOut: (guestId: string) => void;
+  onEditGuest?: (guest: Guest) => void;
+  onFlagGuest?: (guest: Guest) => void;
 }
 
 export function GuestTable({
   guests,
   onViewGuest,
   onCheckOut,
+  onEditGuest,
+  onFlagGuest,
 }: GuestTableProps) {
+  // Track which dropdown is open to prevent conflicts
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+
   const getStatusBadge = (status: Guest["status"]) => {
     switch (status) {
       case "checked-in":
         return (
-          <Badge
-            variant="default"
-            className="bg-success text-success-foreground"
-          >
+          <Badge variant="default" className="bg-green-500 text-white">
             Checked In
           </Badge>
         );
@@ -79,8 +104,24 @@ export function GuestTable({
         return <Badge variant="secondary">Checked Out</Badge>;
       case "pending":
         return (
-          <Badge variant="outline" className="border-warning text-warning">
+          <Badge
+            variant="outline"
+            className="border-yellow-500 text-yellow-600"
+          >
             Pending
+          </Badge>
+        );
+      case "reported":
+        return (
+          <Badge variant="outline" className="border-red-500 text-red-600">
+            Reported
+          </Badge>
+        );
+      case "flagged":
+        return (
+          <Badge variant="destructive">
+            <AlertTriangle className="w-3 h-3 mr-1" />
+            Flagged
           </Badge>
         );
       default:
@@ -111,15 +152,9 @@ export function GuestTable({
 
   // Helper function to get the booking display text
   const getBookingDisplay = (guest: Guest) => {
-    console.log("Guest booking data:", {
-      bookingMode: guest.bookingMode,
-      bookingWebsite: guest.bookingWebsite,
-    });
-
     const bookingMode = guest.bookingMode;
     const bookingWebsite = guest.bookingWebsite;
 
-    // Check if booking mode is "Online" (case-insensitive)
     if (bookingMode && bookingMode.toLowerCase() === "online") {
       if (bookingWebsite && bookingWebsite.trim() !== "") {
         return bookingWebsite;
@@ -143,12 +178,35 @@ export function GuestTable({
     return guest.totalGuests ?? guest.guestCount ?? 0;
   };
 
+  // Handle dropdown actions
+  const handleDropdownAction = (action: string, guest: Guest) => {
+    console.log(`Action: ${action} for guest:`, guest.name);
+    setOpenDropdown(null); // Close dropdown after action
+
+    switch (action) {
+      case "view":
+        onViewGuest(guest);
+        break;
+      case "checkout":
+        onCheckOut(guest._id || guest.id || "");
+        break;
+      case "edit":
+        onEditGuest?.(guest);
+        break;
+      case "flag":
+        onFlagGuest?.(guest);
+        break;
+      default:
+        console.warn("Unknown action:", action);
+    }
+  };
+
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <UserCheck className="w-5 h-5" />
-          Guest Records
+          Guest Records ({guests.length})
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -172,98 +230,174 @@ export function GuestTable({
                     colSpan={7}
                     className="text-center py-8 text-muted-foreground"
                   >
-                    No guests found matching your criteria
+                    <div className="flex flex-col items-center gap-2">
+                      <UserCheck className="w-12 h-12 opacity-20" />
+                      <p>No guests found matching your criteria</p>
+                      <p className="text-sm">
+                        New guest registrations will appear here
+                      </p>
+                    </div>
                   </TableCell>
                 </TableRow>
               ) : (
-                guests.map((guest) => (
-                  <TableRow
-                    key={guest._id || guest.id}
-                    className="hover:bg-muted/50"
-                  >
-                    <TableCell>
-                      <div className="flex items-center gap-3">
-                        <Avatar className="h-8 w-8">
-                          <AvatarFallback className="text-xs bg-primary/10 text-primary">
-                            {getInitials(guest.name)}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <div className="font-medium">
-                            {guest.name || "Unnamed"}
-                          </div>
-                          <div className="text-sm text-muted-foreground flex items-center gap-1">
-                            <MapPin className="w-3 h-3" />
-                            {guest.nationality || "Unknown"}
-                          </div>
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-1 text-sm">
-                          <Phone className="w-3 h-3" />
-                          {guest.phone || "N/A"}
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          {guest.email || "N/A"}
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="font-medium">
-                        {guest.roomNumber || "N/A"}
-                      </div>
-                      <div className="text-sm text-muted-foreground">
-                        {getTotalGuests(guest)} guest
-                        {getTotalGuests(guest) !== 1 ? "s" : ""}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1 text-sm">
-                        <Calendar className="w-3 h-3" />
-                        {formatDate(guest.checkInDate)}
-                      </div>
-                      {guest.checkOutDate && (
-                        <div className="text-sm text-muted-foreground">
-                          Out: {formatDate(guest.checkOutDate)}
-                        </div>
-                      )}
-                    </TableCell>
-                    <TableCell>{getStatusBadge(guest.status)}</TableCell>
-                    <TableCell>
-                      <div className="text-sm">{getPurposeOfVisit(guest)}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {getBookingDisplay(guest)}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="sm">
-                            <MoreHorizontal className="w-4 h-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => onViewGuest(guest)}>
-                            <Eye className="w-4 h-4 mr-2" />
-                            View Details
-                          </DropdownMenuItem>
-                          {guest.status === "checked-in" && (
-                            <DropdownMenuItem
-                              onClick={() =>
-                                onCheckOut(guest._id || guest.id || "")
-                              }
+                guests.map((guest) => {
+                  const guestId = guest._id || guest.id;
+                  return (
+                    <TableRow
+                      key={guestId}
+                      className="hover:bg-muted/50 transition-colors"
+                    >
+                      <TableCell>
+                        <div className="flex items-center gap-3">
+                          <Avatar className="h-8 w-8">
+                            <AvatarFallback
+                              className={`text-xs ${
+                                guest.isFlagged
+                                  ? "bg-red-100 text-red-700 border-red-300"
+                                  : "bg-primary/10 text-primary"
+                              }`}
                             >
-                              <UserX className="w-4 h-4 mr-2" />
-                              Check Out
+                              {getInitials(guest.name)}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div>
+                            <div className="font-medium flex items-center gap-2">
+                              {guest.name || "Unnamed"}
+                              {guest.isFlagged && (
+                                <AlertTriangle className="w-3 h-3 text-red-500" />
+                              )}
+                            </div>
+                            <div className="text-sm text-muted-foreground flex items-center gap-1">
+                              <MapPin className="w-3 h-3" />
+                              {guest.nationality || "Unknown"}
+                            </div>
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1 text-sm">
+                            <Phone className="w-3 h-3" />
+                            {guest.phone || "N/A"}
+                          </div>
+                          <div className="text-sm text-muted-foreground truncate max-w-[200px]">
+                            {guest.email || "N/A"}
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="font-medium">
+                          {guest.roomNumber || "N/A"}
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                          {getTotalGuests(guest)} guest
+                          {getTotalGuests(guest) !== 1 ? "s" : ""}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1 text-sm">
+                          <Calendar className="w-3 h-3" />
+                          {formatDate(guest.checkInDate)}
+                        </div>
+                        {guest.checkOutDate && (
+                          <div className="text-sm text-muted-foreground">
+                            Out: {formatDate(guest.checkOutDate)}
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell>{getStatusBadge(guest.status)}</TableCell>
+                      <TableCell>
+                        <div className="text-sm">
+                          {getPurposeOfVisit(guest)}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {getBookingDisplay(guest)}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <DropdownMenu
+                          open={openDropdown === guestId}
+                          onOpenChange={(open) => {
+                            setOpenDropdown(open ? guestId : null);
+                          }}
+                        >
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                console.log(
+                                  "Dropdown trigger clicked for guest:",
+                                  guest.name
+                                );
+                              }}
+                            >
+                              <MoreHorizontal className="w-4 h-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent
+                            align="end"
+                            className="w-48"
+                            sideOffset={5}
+                          >
+                            <DropdownMenuItem
+                              onClick={(e) => {
+                                e.preventDefault();
+                                handleDropdownAction("view", guest);
+                              }}
+                              className="cursor-pointer"
+                            >
+                              <Eye className="w-4 h-4 mr-2" />
+                              View Details
                             </DropdownMenuItem>
-                          )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                ))
+
+                            {guest.status === "checked-in" && (
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  handleDropdownAction("checkout", guest);
+                                }}
+                                className="cursor-pointer"
+                              >
+                                <UserX className="w-4 h-4 mr-2" />
+                                Check Out
+                              </DropdownMenuItem>
+                            )}
+
+                            <DropdownMenuItem
+                              onClick={(e) => {
+                                e.preventDefault();
+                                handleDropdownAction("edit", guest);
+                              }}
+                              className="cursor-pointer"
+                            >
+                              <Edit className="w-4 h-4 mr-2" />
+                              Edit Details
+                            </DropdownMenuItem>
+
+                            {!guest.isFlagged && onFlagGuest && (
+                              <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    handleDropdownAction("flag", guest);
+                                  }}
+                                  className="cursor-pointer text-red-600 focus:text-red-600"
+                                >
+                                  <AlertTriangle className="w-4 h-4 mr-2" />
+                                  Flag Guest
+                                </DropdownMenuItem>
+                              </>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
               )}
             </TableBody>
           </Table>

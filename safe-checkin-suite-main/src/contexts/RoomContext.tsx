@@ -1,14 +1,25 @@
+// contexts/RoomContext.tsx - Updated with photo support
 import { createContext, useContext, useState, ReactNode } from "react";
+
 interface GuestInfo {
   name: string;
   idType: string;
-  aadhar: string;
+  idNumber: string; // Changed from aadhar to match your backend
+  isPrimary?: boolean;
+  email?: string;
 }
+
+interface PhotoFiles {
+  guestPhoto: File | null;
+  idFront: File | null;
+  idBack: File | null;
+}
+
 interface Guest {
   id: string;
-  name: string; // This will be the actual primary guest's name (not 'Primary Guest')
+  name: string;
   phone: string;
-  email: string; // newly added
+  email: string;
   nationality: string;
   purpose: string;
   guestCount: number;
@@ -19,6 +30,12 @@ interface Guest {
   bookingWebsite?: string;
   referenceNumber?: string;
   guests: GuestInfo[];
+  // Add photo support
+  photos?: {
+    guestPhoto: { fileId: string | null; filename: string | null };
+    idFront: { fileId: string | null; filename: string | null };
+    idBack: { fileId: string | null; filename: string | null };
+  };
 }
 
 interface RoomData {

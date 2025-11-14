@@ -1,4 +1,4 @@
-// CheckIn.tsx - Updated with guest count validation and auto-correction
+// CheckIn.tsx - Updated with photo upload support
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -14,10 +14,21 @@ import CaptureDetailsForm from "@/components/check-in/CaptureDetailsForm";
 import { useToast } from "@/hooks/use-toast";
 import { useRooms } from "@/contexts/RoomContext";
 
+interface PhotoFiles {
+  guestPhoto: File | null;
+  idFront: File | null;
+  idBack: File | null;
+}
+
 const CheckInPage = () => {
   const [step, setStep] = useState(1);
   const [guestFormData, setGuestFormData] = useState<any>(null);
   const [capturedGuestsData, setCapturedGuestsData] = useState<any[]>([]);
+  const [photoFiles, setPhotoFiles] = useState<PhotoFiles>({
+    guestPhoto: null,
+    idFront: null,
+    idBack: null,
+  });
 
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -30,11 +41,55 @@ const CheckInPage = () => {
 
   const handleBack = () => setStep(1);
 
-  // Updated validation function to match backend requirements
-  const validateGuestData = (data: any) => {
+  // Photo validation function
+  const validatePhotoFiles = (files: PhotoFiles): string[] => {
+    const errors: string[] = [];
+    const maxSize = 5 * 1024 * 1024; // 5MB
+    const allowedTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+
+    // Guest photo is required
+    if (!files.guestPhoto) {
+      errors.push("Guest photo is required");
+    } else {
+      if (files.guestPhoto.size > maxSize) {
+        errors.push("Guest photo must be less than 5MB");
+      }
+      if (!allowedTypes.includes(files.guestPhoto.type)) {
+        errors.push("Guest photo must be JPEG, PNG, or WebP format");
+      }
+    }
+
+    // Validate ID photos if provided
+    if (files.idFront) {
+      if (files.idFront.size > maxSize) {
+        errors.push("ID front photo must be less than 5MB");
+      }
+      if (!allowedTypes.includes(files.idFront.type)) {
+        errors.push("ID front photo must be JPEG, PNG, or WebP format");
+      }
+    }
+
+    if (files.idBack) {
+      if (files.idBack.size > maxSize) {
+        errors.push("ID back photo must be less than 5MB");
+      }
+      if (!allowedTypes.includes(files.idBack.type)) {
+        errors.push("ID back photo must be JPEG, PNG, or WebP format");
+      }
+    }
+
+    return errors;
+  };
+
+  // Updated validation function to include photo validation
+  const validateGuestData = (data: any, photos: PhotoFiles) => {
     const errors: string[] = [];
 
-    // Check required fields based on backend validation
+    // Photo validation
+    const photoErrors = validatePhotoFiles(photos);
+    errors.push(...photoErrors);
+
+    // Existing validation logic remains the same
     if (
       !data.name ||
       data.name.trim().length < 2 ||
@@ -154,35 +209,22 @@ const CheckInPage = () => {
     return errors;
   };
 
+  // CheckIn.tsx - Updated handleComplete function
   const handleComplete = async () => {
     if (guestFormData && capturedGuestsData.length > 0) {
       // Find the primary guest from captured guests data
       const primaryGuest = capturedGuestsData.find((guest) => guest.isPrimary);
 
-      // Parse and validate guest counts
+      // Parse and validate guest counts (existing logic remains the same)
       const totalGuestCount = parseInt(guestFormData.guestCount) || 1;
       let maleGuests = parseInt(guestFormData.maleGuests) || 0;
       let femaleGuests = parseInt(guestFormData.femaleGuests) || 0;
       let childGuests = parseInt(guestFormData.childGuests) || 0;
 
-      console.log("Original guest counts:", {
-        total: totalGuestCount,
-        male: maleGuests,
-        female: femaleGuests,
-        child: childGuests,
-        originalSum: maleGuests + femaleGuests + childGuests,
-      });
-
-      // Auto-correct guest counts if they don't match
+      // Auto-correct guest counts logic (existing code)
       const currentSum = maleGuests + femaleGuests + childGuests;
       if (currentSum !== totalGuestCount) {
-        console.warn(
-          `Guest count mismatch detected: total=${totalGuestCount}, sum=${currentSum}`
-        );
-
         if (currentSum === 0) {
-          // If no breakdown provided, distribute guests intelligently
-          // Default strategy: assume mixed adults with slight male preference
           if (totalGuestCount === 1) {
             maleGuests = 1;
             femaleGuests = 0;
@@ -192,13 +234,11 @@ const CheckInPage = () => {
             femaleGuests = 1;
             childGuests = 0;
           } else {
-            // For more than 2 guests, distribute evenly with male preference for odd numbers
             maleGuests = Math.ceil(totalGuestCount / 2);
             femaleGuests = Math.floor(totalGuestCount / 2);
             childGuests = 0;
           }
         } else if (currentSum < totalGuestCount) {
-          // If sum is less than total, add to the largest category
           const diff = totalGuestCount - currentSum;
           if (maleGuests >= femaleGuests && maleGuests >= childGuests) {
             maleGuests += diff;
@@ -208,7 +248,6 @@ const CheckInPage = () => {
             childGuests += diff;
           }
         } else {
-          // If sum is greater than total, reduce from the largest category
           const diff = currentSum - totalGuestCount;
           if (
             maleGuests >= femaleGuests &&
@@ -221,31 +260,20 @@ const CheckInPage = () => {
           } else if (childGuests >= diff) {
             childGuests -= diff;
           } else {
-            // Edge case: reset to default distribution
             maleGuests = Math.ceil(totalGuestCount / 2);
             femaleGuests = Math.floor(totalGuestCount / 2);
             childGuests = 0;
           }
         }
 
-        // Ensure no negative values
         maleGuests = Math.max(0, maleGuests);
         femaleGuests = Math.max(0, femaleGuests);
         childGuests = Math.max(0, childGuests);
-
-        console.log("Corrected guest counts:", {
-          total: totalGuestCount,
-          male: maleGuests,
-          female: femaleGuests,
-          child: childGuests,
-          correctedSum: maleGuests + femaleGuests + childGuests,
-        });
       }
 
-      // Ensure all required fields are properly formatted
+      // Prepare form data
       const finalGuestData = {
         ...guestFormData,
-        // Override name and email with primary guest's data if available
         name:
           (primaryGuest ? primaryGuest.name : guestFormData.name)
             ?.toString()
@@ -272,27 +300,13 @@ const CheckInPage = () => {
           idType: guest.idType || "Other",
           idNumber: guest.idNumber?.toString().trim() || "",
           email:
-            guest.email && guest.email.trim() ? guest.email.trim() : undefined, // Fix for empty email validation
+            guest.email && guest.email.trim() ? guest.email.trim() : undefined,
           isPrimary: guest.isPrimary || false,
         })),
       };
 
-      // Final validation check
-      const finalSum =
-        finalGuestData.maleGuests +
-        finalGuestData.femaleGuests +
-        finalGuestData.childGuests;
-      if (finalSum !== finalGuestData.guestCount) {
-        toast({
-          title: "Data Error",
-          description: `Guest count still doesn't match after correction: Total (${finalGuestData.guestCount}) vs Sum (${finalSum})`,
-          variant: "destructive",
-        });
-        return;
-      }
-
-      // Validate data before sending
-      const validationErrors = validateGuestData(finalGuestData);
+      // Final validation check including photos
+      const validationErrors = validateGuestData(finalGuestData, photoFiles);
       if (validationErrors.length > 0) {
         console.error("Validation errors:", validationErrors);
         toast({
@@ -303,10 +317,67 @@ const CheckInPage = () => {
         return;
       }
 
-      console.log("Final guest data being sent:", finalGuestData); // Debug log
+      console.log("Final guest data being sent:", finalGuestData);
+      console.log("Photo files being sent:", photoFiles);
 
       try {
-        const response = await checkInGuest(finalGuestData);
+        // Create FormData for multipart upload
+        const formData = new FormData();
+
+        // FIXED: Append text fields individually (not as nested objects)
+        formData.append("name", finalGuestData.name);
+        formData.append("phone", finalGuestData.phone);
+        formData.append("email", finalGuestData.email);
+        formData.append("nationality", finalGuestData.nationality);
+        formData.append("purpose", finalGuestData.purpose);
+        formData.append("roomNumber", finalGuestData.roomNumber);
+        formData.append("bookingMode", finalGuestData.bookingMode);
+        formData.append("bookingWebsite", finalGuestData.bookingWebsite);
+        formData.append("guestCount", finalGuestData.guestCount.toString());
+        formData.append("maleGuests", finalGuestData.maleGuests.toString());
+        formData.append("femaleGuests", finalGuestData.femaleGuests.toString());
+        formData.append("childGuests", finalGuestData.childGuests.toString());
+        formData.append("totalAmount", finalGuestData.totalAmount.toString());
+        formData.append(
+          "advanceAmount",
+          finalGuestData.advanceAmount.toString()
+        );
+        formData.append("checkInTime", finalGuestData.checkInTime);
+
+        // FIXED: Handle guests array properly - send as JSON string
+        formData.append("guests", JSON.stringify(finalGuestData.guests));
+
+        // FIXED: Append photo files with proper validation
+        if (photoFiles.guestPhoto) {
+          formData.append(
+            "guestPhoto",
+            photoFiles.guestPhoto,
+            photoFiles.guestPhoto.name
+          );
+        }
+        if (photoFiles.idFront) {
+          formData.append(
+            "idFront",
+            photoFiles.idFront,
+            photoFiles.idFront.name
+          );
+        }
+        if (photoFiles.idBack) {
+          formData.append("idBack", photoFiles.idBack, photoFiles.idBack.name);
+        }
+
+        console.log("=== FormData Contents ===");
+        for (let [key, value] of formData.entries()) {
+          if (value instanceof File) {
+            console.log(
+              `${key}: File - ${value.name} (${value.size} bytes, ${value.type})`
+            );
+          } else {
+            console.log(`${key}: ${value}`);
+          }
+        }
+
+        const response = await checkInGuest(formData);
         console.log("Check-in response:", response);
 
         checkIn(guestFormData.roomNumber, finalGuestData);
@@ -320,11 +391,9 @@ const CheckInPage = () => {
       } catch (error: any) {
         console.error("Check-in error:", error);
 
-        // Enhanced error handling
         let errorMessage = "Something went wrong. Please try again.";
 
         if (error.response?.data?.errors) {
-          // Handle express-validator errors
           const validationErrors = error.response.data.errors.map(
             (err: any) => `${err.path}: ${err.msg}`
           );
@@ -348,10 +417,21 @@ const CheckInPage = () => {
     } else {
       toast({
         title: "Incomplete Data",
-        description: "Please ensure all guest details are captured.",
+        description: "Please ensure all guest details and photos are captured.",
         variant: "destructive",
       });
     }
+  };
+
+  // Handle photo file changes
+  const handlePhotoChange = (
+    photoType: keyof PhotoFiles,
+    file: File | null
+  ) => {
+    setPhotoFiles((prev) => ({
+      ...prev,
+      [photoType]: file,
+    }));
   };
 
   return (
@@ -380,6 +460,8 @@ const CheckInPage = () => {
               onCaptureChange={(data) => setCapturedGuestsData(data)}
               capturedGuestsData={capturedGuestsData}
               primaryGuestName={guestFormData?.name}
+              onPhotoChange={handlePhotoChange}
+              photoFiles={photoFiles}
             />
           )}
         </CardContent>

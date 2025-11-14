@@ -62,10 +62,13 @@ import {
   Building,
   SortAsc,
   SortDesc,
+  Upload,
+  FileText,
 } from "lucide-react";
 import axios from "axios";
 import { Guest } from "@/components/dashboard/GuestTable";
 import { fetchGuests } from "@/api/guestApi";
+import EvidenceUpload from "@/components/Evidence/EvidenceUpload";
 
 // Create axios instance for alerts API with authentication
 const alertsApi = axios.create({
@@ -161,6 +164,7 @@ type SortOrder = "asc" | "desc";
 
 const GuestAlertManagement = () => {
   const [activeTab, setActiveTab] = useState("guests");
+  const [guestSubTab, setGuestSubTab] = useState("search");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchAttempted, setSearchAttempted] = useState(false);
   const [guests, setGuests] = useState<Guest[]>([]);
@@ -532,382 +536,489 @@ const GuestAlertManagement = () => {
 
         {/* Guest Search Tab */}
         <TabsContent value="guests" className="space-y-6">
-          {/* Search Section */}
-          <Card className="shadow-lg">
-            <CardHeader className="pb-4">
-              <CardTitle className="text-xl flex items-center gap-2">
-                <Search className="h-5 w-5" />
-                Search Guests
-              </CardTitle>
-              <CardDescription>
-                Search for guests by name, phone number, or room number
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex flex-col sm:flex-row items-end gap-3">
-                <div className="w-full sm:flex-grow space-y-2">
-                  <Label htmlFor="guestSearch" className="text-sm font-medium">
+          {/* Sub-tabs for Search/Alerts and Evidence */}
+          <Tabs
+            value={guestSubTab}
+            onValueChange={setGuestSubTab}
+            className="w-full"
+          >
+            <TabsList className="grid w-full grid-cols-2 rounded-lg">
+              <TabsTrigger value="search" className="rounded-lg">
+                <Search className="h-4 w-4 mr-2" />
+                Search & Alerts
+              </TabsTrigger>
+              <TabsTrigger value="evidence" className="rounded-lg">
+                <Upload className="h-4 w-4 mr-2" />
+                Upload Evidence
+              </TabsTrigger>
+            </TabsList>
+
+            {/* SEARCH & ALERTS SUB-TAB */}
+            <TabsContent value="search" className="space-y-6">
+              {/* Search Section */}
+              <Card className="shadow-lg">
+                <CardHeader className="pb-4">
+                  <CardTitle className="text-xl flex items-center gap-2">
+                    <Search className="h-5 w-5" />
                     Search Guests
-                  </Label>
-                  <Input
-                    id="guestSearch"
-                    placeholder="Enter guest name, phone, or room number..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleSearchGuests()}
-                    className="rounded-xl"
-                    disabled={loading}
-                  />
-                </div>
-                <Button
-                  onClick={handleSearchGuests}
-                  disabled={loading || !searchQuery.trim()}
-                  className="bg-gradient-to-r from-blue-500 to-purple-600 hover:opacity-90 rounded-xl"
-                >
-                  {loading ? (
-                    <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Searching...
-                    </>
-                  ) : (
-                    <>
-                      <Search className="h-4 w-4 mr-2" />
-                      Search Guests
-                    </>
-                  )}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Results Section */}
-          {searchAttempted && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Guests List */}
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-lg font-semibold text-gray-900">
-                    Search Results
-                  </h2>
-                  <div className="flex items-center space-x-2">
-                    <Select
-                      value={`${sortType}-${sortOrder}`}
-                      onValueChange={(value) => {
-                        const [type, order] = value.split("-") as [
-                          SortType,
-                          SortOrder
-                        ];
-                        setSortType(type);
-                        setSortOrder(order);
-                      }}
-                    >
-                      <SelectTrigger className="w-[140px] rounded-xl">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="name-asc">
-                          <div className="flex items-center">
-                            <SortAsc className="h-4 w-4 mr-2" />
-                            Name (A-Z)
-                          </div>
-                        </SelectItem>
-                        <SelectItem value="name-desc">
-                          <div className="flex items-center">
-                            <SortDesc className="h-4 w-4 mr-2" />
-                            Name (Z-A)
-                          </div>
-                        </SelectItem>
-                        <SelectItem value="date-desc">
-                          <div className="flex items-center">
-                            <Calendar className="h-4 w-4 mr-2" />
-                            Latest
-                          </div>
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-                    {guests.length > 0 && (
-                      <Badge variant="outline" className="text-sm">
-                        {guests.length} found
-                      </Badge>
-                    )}
-                  </div>
-                </div>
-
-                {loading ? (
-                  <div className="text-center py-12">
-                    <RefreshCw className="h-16 w-16 mx-auto text-gray-400 mb-4 animate-spin" />
-                    <h3 className="text-lg font-medium text-gray-900 mb-2">
-                      Searching Guests...
-                    </h3>
-                  </div>
-                ) : guests.length > 0 ? (
-                  <div className="space-y-3">
-                    {sortedGuests.map((guest, index) => {
-                      const statusConfig = getStatusConfig(guest.status);
-                      const isSelected = selectedGuest?._id === guest._id;
-                      const guestAlertCount = allAlerts.filter(
-                        (alert) => alert.guest?.id === guest._id
-                      ).length;
-
-                      return (
-                        <Card
-                          key={guest._id || index}
-                          className={`cursor-pointer transition-all hover:shadow-lg rounded-2xl ${
-                            isSelected ? "ring-2 ring-blue-500 bg-blue-50" : ""
-                          }`}
-                          onClick={() => handleSelectGuest(guest)}
-                        >
-                          <CardContent className="p-4">
-                            <div className="space-y-3">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                  <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center">
-                                    <User className="h-5 w-5 text-gray-600" />
-                                  </div>
-                                  <div>
-                                    <h3 className="font-semibold text-gray-900">
-                                      {guest.name || "N/A"}
-                                    </h3>
-                                    <div className="flex items-center gap-2 mt-1">
-                                      <Badge
-                                        variant="outline"
-                                        className="text-xs"
-                                      >
-                                        Room: {guest.roomNumber || "N/A"}
-                                      </Badge>
-                                      <Badge
-                                        variant="outline"
-                                        className="text-xs"
-                                      >
-                                        {new Date(
-                                          guest.checkInTime ||
-                                            guest.checkInDate ||
-                                            ""
-                                        ).toLocaleDateString()}
-                                      </Badge>
-                                    </div>
-                                  </div>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <span
-                                    className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium border ${statusConfig.color}`}
-                                  >
-                                    <span>{statusConfig.icon}</span>
-                                    {statusConfig.label}
-                                  </span>
-                                  {guestAlertCount > 0 && (
-                                    <Badge
-                                      variant="destructive"
-                                      className="text-xs"
-                                    >
-                                      {guestAlertCount} Alert
-                                      {guestAlertCount > 1 ? "s" : ""}
-                                    </Badge>
-                                  )}
-                                </div>
-                              </div>
-
-                              <div className="text-sm text-gray-600 space-y-1">
-                                <div className="flex items-center gap-2">
-                                  <Phone className="h-3 w-3" />
-                                  <span>{guest.phone || "N/A"}</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <Users className="h-3 w-3" />
-                                  <span>
-                                    Purpose:{" "}
-                                    {guest.purpose ||
-                                      guest.purposeOfVisit ||
-                                      "N/A"}
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <Card className="rounded-2xl">
-                    <CardContent className="p-8 text-center">
-                      <Search className="h-12 w-12 text-gray-400 mx-auto mb-3" />
-                      <h3 className="text-lg font-medium text-gray-900 mb-2">
-                        No guests found
-                      </h3>
-                      <p className="text-gray-600">
-                        No guests match your search criteria: "{searchQuery}"
-                      </p>
-                    </CardContent>
-                  </Card>
-                )}
-              </div>
-
-              {/* Selected Guest Alerts */}
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-lg font-semibold text-gray-900">
-                    {selectedGuest
-                      ? `Alerts for ${selectedGuest.name}`
-                      : "Select a Guest"}
-                  </h2>
-                  {selectedGuest && (
+                  </CardTitle>
+                  <CardDescription>
+                    Search for guests by name, phone number, or room number
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex flex-col sm:flex-row items-end gap-3">
+                    <div className="w-full sm:flex-grow space-y-2">
+                      <Label
+                        htmlFor="guestSearch"
+                        className="text-sm font-medium"
+                      >
+                        Search Guests
+                      </Label>
+                      <Input
+                        id="guestSearch"
+                        placeholder="Enter guest name, phone, or room number..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        onKeyDown={(e) =>
+                          e.key === "Enter" && handleSearchGuests()
+                        }
+                        className="rounded-xl"
+                        disabled={loading}
+                      />
+                    </div>
                     <Button
-                      onClick={() => {
-                        setNewAlertData({
-                          title: `Alert for ${selectedGuest.name}`,
-                          description: `Alert regarding guest ${
-                            selectedGuest.name
-                          } in room ${selectedGuest.roomNumber || "Unknown"}.`,
-                          priority: "Medium",
-                          type: "Police",
-                        });
-                        setShowAddAlertModal(true);
-                      }}
+                      onClick={handleSearchGuests}
+                      disabled={loading || !searchQuery.trim()}
                       className="bg-gradient-to-r from-blue-500 to-purple-600 hover:opacity-90 rounded-xl"
-                      size="sm"
                     >
-                      <Plus className="h-4 w-4 mr-1" />
-                      New Alert
+                      {loading ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Searching...
+                        </>
+                      ) : (
+                        <>
+                          <Search className="h-4 w-4 mr-2" />
+                          Search Guests
+                        </>
+                      )}
                     </Button>
-                  )}
-                </div>
+                  </div>
+                </CardContent>
+              </Card>
 
-                {selectedGuest ? (
-                  <div className="space-y-3">
-                    {guestAlerts.length > 0 ? (
-                      guestAlerts.map((alert) => {
-                        return (
-                          <Card
-                            key={alert.id}
-                            className="shadow-lg rounded-2xl border hover:shadow-xl transition-all duration-300"
-                          >
-                            <CardContent className="p-4">
-                              <div className="space-y-3">
-                                <div className="flex items-start justify-between">
-                                  <div className="flex-1">
-                                    <div className="flex items-center gap-2 mb-2">
-                                      <div
-                                        className={`h-3 w-3 rounded-full ${getPriorityColor(
-                                          alert.priority
-                                        )}`}
-                                      />
-                                      <h3 className="font-semibold text-gray-900">
-                                        {alert.title}
-                                      </h3>
+              {/* Results Section */}
+              {searchAttempted && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Guests List */}
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h2 className="text-lg font-semibold text-gray-900">
+                        Search Results
+                      </h2>
+                      <div className="flex items-center space-x-2">
+                        <Select
+                          value={`${sortType}-${sortOrder}`}
+                          onValueChange={(value) => {
+                            const [type, order] = value.split("-") as [
+                              SortType,
+                              SortOrder
+                            ];
+                            setSortType(type);
+                            setSortOrder(order);
+                          }}
+                        >
+                          <SelectTrigger className="w-[140px] rounded-xl">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="name-asc">
+                              <div className="flex items-center">
+                                <SortAsc className="h-4 w-4 mr-2" />
+                                Name (A-Z)
+                              </div>
+                            </SelectItem>
+                            <SelectItem value="name-desc">
+                              <div className="flex items-center">
+                                <SortDesc className="h-4 w-4 mr-2" />
+                                Name (Z-A)
+                              </div>
+                            </SelectItem>
+                            <SelectItem value="date-desc">
+                              <div className="flex items-center">
+                                <Calendar className="h-4 w-4 mr-2" />
+                                Latest
+                              </div>
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                        {guests.length > 0 && (
+                          <Badge variant="outline" className="text-sm">
+                            {guests.length} found
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+
+                    {loading ? (
+                      <div className="text-center py-12">
+                        <RefreshCw className="h-16 w-16 mx-auto text-gray-400 mb-4 animate-spin" />
+                        <h3 className="text-lg font-medium text-gray-900 mb-2">
+                          Searching Guests...
+                        </h3>
+                      </div>
+                    ) : guests.length > 0 ? (
+                      <div className="space-y-3">
+                        {sortedGuests.map((guest, index) => {
+                          const statusConfig = getStatusConfig(guest.status);
+                          const isSelected = selectedGuest?._id === guest._id;
+                          const guestAlertCount = allAlerts.filter(
+                            (alert) => alert.guest?.id === guest._id
+                          ).length;
+
+                          return (
+                            <Card
+                              key={guest._id || index}
+                              className={`cursor-pointer transition-all hover:shadow-lg rounded-2xl ${
+                                isSelected
+                                  ? "ring-2 ring-blue-500 bg-blue-50"
+                                  : ""
+                              }`}
+                              onClick={() => handleSelectGuest(guest)}
+                            >
+                              <CardContent className="p-4">
+                                <div className="space-y-3">
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-3">
+                                      <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center">
+                                        <User className="h-5 w-5 text-gray-600" />
+                                      </div>
+                                      <div>
+                                        <h3 className="font-semibold text-gray-900">
+                                          {guest.name || "N/A"}
+                                        </h3>
+                                        <div className="flex items-center gap-2 mt-1">
+                                          <Badge
+                                            variant="outline"
+                                            className="text-xs"
+                                          >
+                                            Room: {guest.roomNumber || "N/A"}
+                                          </Badge>
+                                          <Badge
+                                            variant="outline"
+                                            className="text-xs"
+                                          >
+                                            {new Date(
+                                              guest.checkInTime ||
+                                                guest.checkInDate ||
+                                                ""
+                                            ).toLocaleDateString()}
+                                          </Badge>
+                                        </div>
+                                      </div>
                                     </div>
-                                    <p className="text-sm text-gray-600 mb-2 line-clamp-2">
-                                      {alert.description}
-                                    </p>
-                                    <div className="flex items-center gap-2 mb-2">
-                                      <Badge
-                                        variant={
-                                          alert.status === "Resolved"
-                                            ? "default"
-                                            : "secondary"
-                                        }
-                                        className="text-xs"
+                                    <div className="flex items-center gap-2">
+                                      <span
+                                        className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium border ${statusConfig.color}`}
                                       >
-                                        {getAlertStatusIcon(alert.status)}
-                                        <span className="ml-1">
-                                          {alert.status}
-                                        </span>
-                                      </Badge>
-                                      <Badge
-                                        variant="outline"
-                                        className="text-xs"
-                                      >
-                                        {alert.priority}
-                                      </Badge>
-                                      <Badge
-                                        variant="outline"
-                                        className="text-xs"
-                                      >
-                                        {alert.type}
-                                      </Badge>
-                                    </div>
-                                    <div className="text-xs text-gray-500">
-                                      Created: {formatDateTime(alert.createdAt)}
+                                        <span>{statusConfig.icon}</span>
+                                        {statusConfig.label}
+                                      </span>
+                                      {guestAlertCount > 0 && (
+                                        <Badge
+                                          variant="destructive"
+                                          className="text-xs"
+                                        >
+                                          {guestAlertCount} Alert
+                                          {guestAlertCount > 1 ? "s" : ""}
+                                        </Badge>
+                                      )}
                                     </div>
                                   </div>
-                                  <div className="flex items-center gap-2">
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() => {
-                                        setSelectedAlert(alert);
-                                        setShowAlertModal(true);
-                                      }}
-                                      className="rounded-full h-8 w-8 p-0"
-                                    >
-                                      <Eye className="h-4 w-4" />
-                                    </Button>
-                                    <Button
-                                      variant="destructive"
-                                      size="sm"
-                                      onClick={() => setDeleteAlertId(alert.id)}
-                                      className="rounded-full h-8 w-8 p-0"
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </Button>
+
+                                  <div className="text-sm text-gray-600 space-y-1">
+                                    <div className="flex items-center gap-2">
+                                      <Phone className="h-3 w-3" />
+                                      <span>{guest.phone || "N/A"}</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <Users className="h-3 w-3" />
+                                      <span>
+                                        Purpose:{" "}
+                                        {guest.purpose ||
+                                          guest.purposeOfVisit ||
+                                          "N/A"}
+                                      </span>
+                                    </div>
                                   </div>
                                 </div>
-                              </div>
-                            </CardContent>
-                          </Card>
-                        );
-                      })
+                              </CardContent>
+                            </Card>
+                          );
+                        })}
+                      </div>
                     ) : (
                       <Card className="rounded-2xl">
                         <CardContent className="p-8 text-center">
-                          <Bell className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+                          <Search className="h-12 w-12 text-gray-400 mx-auto mb-3" />
                           <h3 className="text-lg font-medium text-gray-900 mb-2">
-                            No alerts found
+                            No guests found
                           </h3>
-                          <p className="text-gray-600 mb-4">
-                            This guest has no alerts currently
+                          <p className="text-gray-600">
+                            No guests match your search criteria: "{searchQuery}
+                            "
                           </p>
-                          <Button
-                            onClick={() => {
-                              setNewAlertData({
-                                title: `Alert for ${selectedGuest.name}`,
-                                description: `Alert regarding guest ${
-                                  selectedGuest.name
-                                } in room ${
-                                  selectedGuest.roomNumber || "Unknown"
-                                }.`,
-                                priority: "Medium",
-                                type: "Police",
-                              });
-                              setShowAddAlertModal(true);
-                            }}
-                            className="bg-gradient-to-r from-blue-500 to-purple-600 hover:opacity-90 rounded-xl"
-                            size="sm"
-                          >
-                            <Plus className="h-4 w-4 mr-1" />
-                            Create First Alert
-                          </Button>
                         </CardContent>
                       </Card>
                     )}
                   </div>
-                ) : (
-                  <Card className="rounded-2xl">
-                    <CardContent className="p-8 text-center">
-                      <User className="h-12 w-12 text-gray-400 mx-auto mb-3" />
-                      <h3 className="text-lg font-medium text-gray-900 mb-2">
-                        No guest selected
-                      </h3>
-                      <p className="text-gray-600">
-                        Select a guest from the search results to view and
-                        manage their alerts
+
+                  {/* Selected Guest Alerts */}
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h2 className="text-lg font-semibold text-gray-900">
+                        {selectedGuest
+                          ? `Alerts for ${selectedGuest.name}`
+                          : "Select a Guest"}
+                      </h2>
+                      {selectedGuest && (
+                        <Button
+                          onClick={() => {
+                            setNewAlertData({
+                              title: `Alert for ${selectedGuest.name}`,
+                              description: `Alert regarding guest ${
+                                selectedGuest.name
+                              } in room ${
+                                selectedGuest.roomNumber || "Unknown"
+                              }.`,
+                              priority: "Medium",
+                              type: "Police",
+                            });
+                            setShowAddAlertModal(true);
+                          }}
+                          className="bg-gradient-to-r from-blue-500 to-purple-600 hover:opacity-90 rounded-xl"
+                          size="sm"
+                        >
+                          <Plus className="h-4 w-4 mr-1" />
+                          New Alert
+                        </Button>
+                      )}
+                    </div>
+
+                    {selectedGuest ? (
+                      <div className="space-y-3">
+                        {guestAlerts.length > 0 ? (
+                          guestAlerts.map((alert) => {
+                            return (
+                              <Card
+                                key={alert.id}
+                                className="shadow-lg rounded-2xl border hover:shadow-xl transition-all duration-300"
+                              >
+                                <CardContent className="p-4">
+                                  <div className="space-y-3">
+                                    <div className="flex items-start justify-between">
+                                      <div className="flex-1">
+                                        <div className="flex items-center gap-2 mb-2">
+                                          <div
+                                            className={`h-3 w-3 rounded-full ${getPriorityColor(
+                                              alert.priority
+                                            )}`}
+                                          />
+                                          <h3 className="font-semibold text-gray-900">
+                                            {alert.title}
+                                          </h3>
+                                        </div>
+                                        <p className="text-sm text-gray-600 mb-2 line-clamp-2">
+                                          {alert.description}
+                                        </p>
+                                        <div className="flex items-center gap-2 mb-2">
+                                          <Badge
+                                            variant={
+                                              alert.status === "Resolved"
+                                                ? "default"
+                                                : "secondary"
+                                            }
+                                            className="text-xs"
+                                          >
+                                            {getAlertStatusIcon(alert.status)}
+                                            <span className="ml-1">
+                                              {alert.status}
+                                            </span>
+                                          </Badge>
+                                          <Badge
+                                            variant="outline"
+                                            className="text-xs"
+                                          >
+                                            {alert.priority}
+                                          </Badge>
+                                          <Badge
+                                            variant="outline"
+                                            className="text-xs"
+                                          >
+                                            {alert.type}
+                                          </Badge>
+                                        </div>
+                                        <div className="text-xs text-gray-500">
+                                          Created:{" "}
+                                          {formatDateTime(alert.createdAt)}
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={() => {
+                                            setSelectedAlert(alert);
+                                            setShowAlertModal(true);
+                                          }}
+                                          className="rounded-full h-8 w-8 p-0"
+                                        >
+                                          <Eye className="h-4 w-4" />
+                                        </Button>
+                                        <Button
+                                          variant="destructive"
+                                          size="sm"
+                                          onClick={() =>
+                                            setDeleteAlertId(alert.id)
+                                          }
+                                          className="rounded-full h-8 w-8 p-0"
+                                        >
+                                          <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </CardContent>
+                              </Card>
+                            );
+                          })
+                        ) : (
+                          <Card className="rounded-2xl">
+                            <CardContent className="p-8 text-center">
+                              <Bell className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+                              <h3 className="text-lg font-medium text-gray-900 mb-2">
+                                No alerts found
+                              </h3>
+                              <p className="text-gray-600 mb-4">
+                                This guest has no alerts currently
+                              </p>
+                              <Button
+                                onClick={() => {
+                                  setNewAlertData({
+                                    title: `Alert for ${selectedGuest.name}`,
+                                    description: `Alert regarding guest ${
+                                      selectedGuest.name
+                                    } in room ${
+                                      selectedGuest.roomNumber || "Unknown"
+                                    }.`,
+                                    priority: "Medium",
+                                    type: "Police",
+                                  });
+                                  setShowAddAlertModal(true);
+                                }}
+                                className="bg-gradient-to-r from-blue-500 to-purple-600 hover:opacity-90 rounded-xl"
+                                size="sm"
+                              >
+                                <Plus className="h-4 w-4 mr-1" />
+                                Create First Alert
+                              </Button>
+                            </CardContent>
+                          </Card>
+                        )}
+                      </div>
+                    ) : (
+                      <Card className="rounded-2xl">
+                        <CardContent className="p-8 text-center">
+                          <User className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+                          <h3 className="text-lg font-medium text-gray-900 mb-2">
+                            No guest selected
+                          </h3>
+                          <p className="text-gray-600">
+                            Select a guest from the search results to view and
+                            manage their alerts
+                          </p>
+                        </CardContent>
+                      </Card>
+                    )}
+                  </div>
+                </div>
+              )}
+            </TabsContent>
+
+            {/* EVIDENCE UPLOAD SUB-TAB */}
+            <TabsContent value="evidence" className="space-y-6">
+              <Card className="rounded-lg shadow-lg">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <FileText className="h-5 w-5" />
+                    Upload Evidence for Guest
+                  </CardTitle>
+                  <CardDescription>
+                    Upload photos, videos, or documents as evidence for the
+                    selected guest
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {selectedGuest ? (
+                    <div className="space-y-4">
+                      {/* Selected Guest Info */}
+                      <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+                        <p className="text-xs text-blue-700 mb-1">
+                          Uploading evidence for:
+                        </p>
+                        <p className="font-semibold text-blue-900 text-lg">
+                          {selectedGuest.name}
+                        </p>
+                        <div className="flex items-center gap-3 mt-2">
+                          <div className="flex items-center gap-1 text-sm text-blue-700">
+                            <Phone className="h-3 w-3" />
+                            {selectedGuest.phone}
+                          </div>
+                          <div className="flex items-center gap-1 text-sm text-blue-700">
+                            <MapPin className="h-3 w-3" />
+                            Room {selectedGuest.roomNumber || "N/A"}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Evidence Upload Component */}
+                      <EvidenceUpload
+                        suspectId={selectedGuest._id}
+                        guestId={selectedGuest._id}
+                        onUploadSuccess={() => {
+                          toast({
+                            title: "✅ Success",
+                            description:
+                              "Evidence uploaded and shared with police",
+                          });
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <div className="text-center py-16">
+                      <AlertTriangle className="h-16 w-16 mx-auto text-gray-400 mb-4" />
+                      <p className="text-gray-600 font-medium text-lg mb-2">
+                        No Guest Selected
                       </p>
-                    </CardContent>
-                  </Card>
-                )}
-              </div>
-            </div>
-          )}
+                      <p className="text-sm text-gray-500 mb-4">
+                        Please select a guest from the "Search & Alerts" tab
+                        first
+                      </p>
+                      <Button
+                        onClick={() => setGuestSubTab("search")}
+                        variant="outline"
+                        className="rounded-xl"
+                      >
+                        <Search className="h-4 w-4 mr-2" />
+                        Go to Search
+                      </Button>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
         </TabsContent>
 
         {/* All Alerts Tab */}
@@ -1340,13 +1451,26 @@ const GuestAlertManagement = () => {
                     {selectedAlert.hotel.address && (
                       <div className="col-span-2">
                         <Label className="text-xs text-gray-500">Address</Label>
-                        <p className="text-sm">{selectedAlert.hotel.address}</p>
+                        <p className="text-sm">
+                          {(() => {
+                            const addr = selectedAlert.hotel.address;
+                            if (typeof addr === "string") return addr;
+                            if (addr?.fullAddress) return addr.fullAddress;
+                            const parts = [
+                              addr?.street,
+                              addr?.city,
+                              addr?.state,
+                              addr?.zipCode,
+                              addr?.country,
+                            ].filter(Boolean);
+                            return parts.length > 0 ? parts.join(", ") : "N/A";
+                          })()}
+                        </p>
                       </div>
                     )}
                   </div>
                 </div>
               )}
-
               {/* Timeline */}
               {selectedAlert.timeline && selectedAlert.timeline.length > 0 && (
                 <div className="space-y-3">

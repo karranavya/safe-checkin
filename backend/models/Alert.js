@@ -1,4 +1,4 @@
-// models/Alert.js - ENHANCED WITH SOFT DELETE AND SUSPECT TRACKING
+// models/Alert.js - COMPLETE ENHANCED VERSION
 const mongoose = require("mongoose");
 
 const alertSchema = new mongoose.Schema(
@@ -15,6 +15,31 @@ const alertSchema = new mongoose.Schema(
       required: [true, "Guest ID is required"],
       index: true,
     },
+    suspectVerification: {
+      isVerifiedSuspect: {
+        type: Boolean,
+        default: false,
+        index: true,
+      },
+      suspectId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Suspect",
+        default: null,
+      },
+      verifiedAt: {
+        type: Date,
+        default: null,
+      },
+      verifiedBy: {
+        policeId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Police",
+        },
+        name: String,
+        rank: String,
+      },
+    },
+
     type: {
       type: String,
       required: [true, "Alert type is required"],
@@ -57,7 +82,8 @@ const alertSchema = new mongoose.Schema(
       default: "Pending",
       index: true,
     },
-    // ⭐ NEW: Suspect Management Fields
+
+    // ========== SUSPECT MANAGEMENT ========== //
     suspectDetails: {
       isSuspect: {
         type: Boolean,
@@ -68,7 +94,6 @@ const alertSchema = new mongoose.Schema(
         type: String,
         index: true,
       },
-      // Soft delete fields for suspect
       suspectDeleted: {
         type: Boolean,
         default: false,
@@ -89,7 +114,6 @@ const alertSchema = new mongoose.Schema(
         type: String,
         trim: true,
       },
-      // Backup suspect data for admin access
       suspectBackup: {
         name: String,
         phone: String,
@@ -101,6 +125,7 @@ const alertSchema = new mongoose.Schema(
         occupation: String,
       },
     },
+
     assignedTo: {
       name: String,
       role: String,
@@ -174,12 +199,10 @@ const alertSchema = new mongoose.Schema(
   }
 );
 
-// Existing indexes
+// ========== INDEXES ========== //
 alertSchema.index({ hotelId: 1, status: 1, createdAt: -1 });
 alertSchema.index({ hotelId: 1, type: 1, priority: -1 });
 alertSchema.index({ hotelId: 1, guestId: 1, createdAt: -1 });
-
-// ⭐ NEW: Enhanced indexes for suspect management [web:115][web:121]
 alertSchema.index(
   {
     "suspectDetails.isSuspect": 1,
@@ -191,7 +214,6 @@ alertSchema.index(
     background: true,
   }
 );
-
 alertSchema.index(
   {
     "suspectDetails.suspectId": 1,
@@ -202,8 +224,6 @@ alertSchema.index(
     background: true,
   }
 );
-
-// ⭐ NEW: Index for admin suspect tracking (includes deleted)
 alertSchema.index(
   {
     "suspectDetails.isSuspect": 1,
@@ -215,7 +235,7 @@ alertSchema.index(
   }
 );
 
-// Existing virtual fields
+// ========== VIRTUAL FIELDS ========== //
 alertSchema.virtual("age").get(function () {
   return Date.now() - this.createdAt;
 });
@@ -231,14 +251,13 @@ alertSchema.virtual("responseTime").get(function () {
   return null;
 });
 
-// ⭐ NEW: Virtual for suspect status
 alertSchema.virtual("suspectStatus").get(function () {
   if (!this.suspectDetails?.isSuspect) return "Not a suspect";
   if (this.suspectDetails?.suspectDeleted) return "Deleted suspect";
   return "Active suspect";
 });
 
-// Pre-save middleware
+// ========== PRE-SAVE MIDDLEWARE ========== //
 alertSchema.pre("save", function (next) {
   if (this.status === "Resolved" && !this.expiresAt) {
     this.expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
@@ -247,30 +266,95 @@ alertSchema.pre("save", function (next) {
   next();
 });
 
-// ⭐ NEW: Static methods for suspect management [web:115][web:118]
-alertSchema.statics.getSuspects = function (includeDeleted = false) {
-  const filter = {
-    "suspectDetails.isSuspect": true,
-  };
+// ========== STATIC METHODS ========== //
 
-  if (!includeDeleted) {
-    filter["suspectDetails.suspectDeleted"] = { $ne: true };
-  }
+// Check if guest has unresolved alerts
+alertSchema.statics.hasUnresolvedAlerts = function (guestId, hotelId) {
+  return this.findOne({
+    guestId,
+    hotelId,
+    status: { $nin: ["Resolved", "Cancelled"] },
+    isActive: true,
+  });
+};
 
-  return this.find(filter)
-    .populate("guestId", "name phone email aadhar address age occupation")
+// Get unresolved alerts count
+alertSchema.statics.getUnresolvedAlertsCount = function (guestId, hotelId) {
+  return this.countDocuments({
+    guestId,
+    hotelId,
+    status: { $nin: ["Resolved", "Cancelled"] },
+    isActive: true,
+  });
+};
+
+// Get unresolved alerts
+alertSchema.statics.getUnresolvedAlerts = function (guestId, hotelId) {
+  return this.find({
+    guestId,
+    hotelId,
+    status: { $nin: ["Resolved", "Cancelled"] },
+    isActive: true,
+  })
+    .populate("guestId", "name roomNumber phone")
     .sort({ createdAt: -1 });
 };
 
+// Get active alerts
+alertSchema.statics.getActiveAlerts = function (hotelId) {
+  return this.find({
+    hotelId,
+    isActive: true,
+  })
+    .populate("guestId", "name roomNumber phone")
+    .sort({ priority: -1, createdAt: -1 });
+};
+
+// Get alerts by priority
+alertSchema.statics.getAlertsByPriority = function (hotelId, priority) {
+  return this.find({
+    hotelId,
+    priority,
+    isActive: true,
+  })
+    .populate("guestId", "name roomNumber phone")
+    .sort({ createdAt: -1 });
+};
+
+// Get alert statistics
+alertSchema.statics.getAlertStats = function (hotelId) {
+  return this.aggregate([
+    { $match: { hotelId: mongoose.Types.ObjectId(hotelId) } },
+    {
+      $group: {
+        _id: "$status",
+        count: { $sum: 1 },
+      },
+    },
+  ]);
+};
+
+// ⭐ NEW: Get active suspects (not deleted)
 alertSchema.statics.getActiveSuspects = function () {
-  return this.getSuspects(false);
+  return this.find({
+    "suspectDetails.isSuspect": true,
+    "suspectDetails.suspectDeleted": false,
+  })
+    .populate("guestId", "name phone email age occupation address")
+    .sort({ createdAt: -1 });
 };
 
+// ⭐ NEW: Get all suspects (including deleted - admin only)
 alertSchema.statics.getAllSuspectsForAdmin = function () {
-  return this.getSuspects(true);
+  return this.find({
+    "suspectDetails.isSuspect": true,
+  })
+    .populate("guestId", "name phone email age occupation address")
+    .sort({ "suspectDetails.suspectDeletedAt": -1, createdAt: -1 });
 };
 
-alertSchema.statics.softDeleteSuspect = function (
+// ⭐ NEW: Soft delete suspect
+alertSchema.statics.softDeleteSuspect = async function (
   suspectId,
   deletedBy,
   reason
@@ -279,7 +363,6 @@ alertSchema.statics.softDeleteSuspect = function (
     {
       "suspectDetails.suspectId": suspectId,
       "suspectDetails.isSuspect": true,
-      "suspectDetails.suspectDeleted": { $ne: true },
     },
     {
       $set: {
@@ -292,7 +375,8 @@ alertSchema.statics.softDeleteSuspect = function (
   );
 };
 
-alertSchema.statics.restoreSuspect = function (suspectId) {
+// ⭐ NEW: Restore deleted suspect
+alertSchema.statics.restoreSuspect = async function (suspectId) {
   return this.updateMany(
     {
       "suspectDetails.suspectId": suspectId,
@@ -310,65 +394,14 @@ alertSchema.statics.restoreSuspect = function (suspectId) {
   );
 };
 
-// Existing static methods remain unchanged...
-alertSchema.statics.hasUnresolvedAlerts = function (guestId, hotelId) {
+// ⭐ NEW: Get suspect by suspect ID
+alertSchema.statics.getSuspectBySuspectId = function (suspectId) {
   return this.findOne({
-    guestId,
-    hotelId,
-    status: { $nin: ["Resolved", "Cancelled"] },
-    isActive: true,
-  });
-};
-
-alertSchema.statics.getUnresolvedAlertsCount = function (guestId, hotelId) {
-  return this.countDocuments({
-    guestId,
-    hotelId,
-    status: { $nin: ["Resolved", "Cancelled"] },
-    isActive: true,
-  });
-};
-
-alertSchema.statics.getUnresolvedAlerts = function (guestId, hotelId) {
-  return this.find({
-    guestId,
-    hotelId,
-    status: { $nin: ["Resolved", "Cancelled"] },
-    isActive: true,
+    "suspectDetails.suspectId": suspectId,
+    "suspectDetails.isSuspect": true,
   })
-    .populate("guestId", "name roomNumber phone")
+    .populate("guestId", "name phone email")
     .sort({ createdAt: -1 });
-};
-
-alertSchema.statics.getActiveAlerts = function (hotelId) {
-  return this.find({
-    hotelId,
-    isActive: true,
-  })
-    .populate("guestId", "name roomNumber phone")
-    .sort({ priority: -1, createdAt: -1 });
-};
-
-alertSchema.statics.getAlertsByPriority = function (hotelId, priority) {
-  return this.find({
-    hotelId,
-    priority,
-    isActive: true,
-  })
-    .populate("guestId", "name roomNumber phone")
-    .sort({ createdAt: -1 });
-};
-
-alertSchema.statics.getAlertStats = function (hotelId) {
-  return this.aggregate([
-    { $match: { hotelId: mongoose.Types.ObjectId(hotelId) } },
-    {
-      $group: {
-        _id: "$status",
-        count: { $sum: 1 },
-      },
-    },
-  ]);
 };
 
 module.exports = mongoose.model("Alert", alertSchema);

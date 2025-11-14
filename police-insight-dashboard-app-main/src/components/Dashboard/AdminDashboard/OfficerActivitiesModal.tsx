@@ -39,6 +39,7 @@ import {
   TrendingUp,
   Database,
 } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface ActivityLog {
@@ -78,7 +79,35 @@ interface OfficerActivitiesModalProps {
   officerId: string;
   officerName: string;
 }
+const formatStatusChangeDisplay = (activity: ActivityLog) => {
+  const { details } = activity;
 
+  if (details?.previousStatus && details?.newStatus) {
+    return (
+      <div className="flex items-center gap-2 mt-2">
+        <Badge className="bg-gray-200 text-gray-800 text-xs">
+          {details.previousStatus}
+        </Badge>
+        <ArrowRight className="h-3 w-3 text-blue-600" />
+        <Badge className="bg-green-600 text-white text-xs">
+          {details.newStatus}
+        </Badge>
+      </div>
+    );
+  }
+
+  if (details?.statusChange) {
+    return (
+      <div className="mt-2">
+        <Badge variant="outline" className="text-xs">
+          {details.statusChange}
+        </Badge>
+      </div>
+    );
+  }
+
+  return null;
+};
 export const OfficerActivitiesModal: React.FC<OfficerActivitiesModalProps> = ({
   isOpen,
   onClose,
@@ -600,6 +629,10 @@ export const OfficerActivitiesModal: React.FC<OfficerActivitiesModalProps> = ({
                           <p className="font-medium text-gray-900">
                             {formatActivityDescription(activity)}
                           </p>
+
+                          {/* ⭐ NEW: Show status change */}
+                          {formatStatusChangeDisplay(activity)}
+
                           <div className="flex items-center gap-2 mt-1 flex-wrap">
                             <span className="text-sm text-gray-500">
                               {activity.targetType}
@@ -642,16 +675,24 @@ export const OfficerActivitiesModal: React.FC<OfficerActivitiesModalProps> = ({
                                   {activity.details.alertTitle}
                                 </div>
                               )}
-                              {activity.details.targetOfficer && (
+                              {activity.details.guestName && (
                                 <div>
-                                  <span className="font-medium">Target:</span>{" "}
-                                  {activity.details.targetOfficer}
+                                  <span className="font-medium">Guest:</span>{" "}
+                                  {activity.details.guestName}
                                 </div>
                               )}
-                              {activity.details.newStatus && (
+                              {activity.details.updatedBy && (
                                 <div>
-                                  <span className="font-medium">Status:</span>{" "}
-                                  {activity.details.newStatus}
+                                  <span className="font-medium">
+                                    Updated By:
+                                  </span>{" "}
+                                  {activity.details.updatedBy}
+                                </div>
+                              )}
+                              {activity.details.notes && (
+                                <div className="md:col-span-2">
+                                  <span className="font-medium">Notes:</span>{" "}
+                                  {activity.details.notes}
                                 </div>
                               )}
                             </div>

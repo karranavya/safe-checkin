@@ -1,10 +1,12 @@
-// controllers/alertController.js - COMPLETE ENHANCED VERSION WITH SUSPECT MANAGEMENT
+// controllers/alertController.js - COMPLETE WITH ACTIVITY LOGGING & SUSPECT MANAGEMENT
 const Alert = require("../models/Alert");
 const Guest = require("../models/Guest");
+const Hotel = require("../models/Hotel");
+const ActivityLog = require("../models/ActivityLog");
 const { logActivity } = require("./activityController");
 const mongoose = require("mongoose");
 
-// ⭐ NEW: Mark alert as suspect and create suspect ID
+// ========== MARK AS SUSPECT ========== //
 const markAsSuspect = async (req, res) => {
   try {
     const { alertId } = req.params;
@@ -18,10 +20,8 @@ const markAsSuspect = async (req, res) => {
       });
     }
 
-    // Generate unique suspect ID
     const suspectId = `SUSPECT_${alert.guestId._id}_${Date.now()}`;
 
-    // Create backup of suspect data
     const suspectBackup = {
       name: alert.guestId.name,
       phone: alert.guestId.phone,
@@ -33,7 +33,6 @@ const markAsSuspect = async (req, res) => {
       occupation: alert.guestId.occupation || "",
     };
 
-    // Update alert with suspect information
     alert.suspectDetails = {
       isSuspect: true,
       suspectId: suspectId,
@@ -46,9 +45,9 @@ const markAsSuspect = async (req, res) => {
 
     await alert.save();
 
-    // Log suspect creation activity
+    // ✅ Log suspect creation activity
     await logActivity(
-      req.user?.policeId || "system",
+      req.user?.policeId || req.user?._id || "system",
       "suspect_added",
       "suspect",
       suspectId,
@@ -58,9 +57,12 @@ const markAsSuspect = async (req, res) => {
         guestId: alert.guestId._id,
         hotelId: alert.hotelId,
         actionTaken: "marked_as_suspect",
+        performedBy: req.user?.name || "Police Officer",
       },
       req
     );
+
+    console.log("✅ Guest marked as suspect:", suspectId);
 
     res.json({
       success: true,
@@ -78,7 +80,7 @@ const markAsSuspect = async (req, res) => {
   }
 };
 
-// ⭐ NEW: Soft delete suspect
+// ========== DELETE SUSPECT (SOFT DELETE) ========== //
 const deleteSuspect = async (req, res) => {
   try {
     const { suspectId } = req.params;
@@ -91,7 +93,6 @@ const deleteSuspect = async (req, res) => {
       });
     }
 
-    // Find the suspect alert to get details for logging
     const suspectAlert = await Alert.findOne({
       "suspectDetails.suspectId": suspectId,
       "suspectDetails.isSuspect": true,
@@ -111,14 +112,13 @@ const deleteSuspect = async (req, res) => {
       policeId: req.user?.policeId?.toString() || "",
     };
 
-    // Soft delete the suspect (update all related alerts)
     const result = await Alert.softDeleteSuspect(
       suspectId,
       deletedBy,
       reason.trim()
     );
 
-    // Log suspect deletion activity
+    // ✅ Log suspect deletion activity
     await logActivity(
       req.user?.policeId?.toString() || "system",
       "suspect_deleted",
@@ -133,10 +133,11 @@ const deleteSuspect = async (req, res) => {
         alertsAffected: result.modifiedCount,
         guestId: suspectAlert.guestId?._id,
         hotelId: suspectAlert.hotelId,
-        deletionMethod: "soft_delete",
       },
       req
     );
+
+    console.log(`✅ Suspect deleted: ${suspectId}`);
 
     res.json({
       success: true,
@@ -162,18 +163,16 @@ const deleteSuspect = async (req, res) => {
   }
 };
 
-// ⭐ NEW: Get all suspects (for police dashboard)
+// ========== GET ALL SUSPECTS ========== //
 const getAllSuspects = async (req, res) => {
   try {
     const { includeDeleted = "false", page = 1, limit = 20 } = req.query;
     const showDeleted = includeDeleted === "true";
 
-    // Only admin police can see deleted suspects
     if (showDeleted && req.user?.policeRole !== "admin_police") {
       return res.status(403).json({
         success: false,
-        error:
-          "Access denied. Admin police role required to view deleted suspects.",
+        error: "Admin police role required to view deleted suspects.",
       });
     }
 
@@ -186,7 +185,6 @@ const getAllSuspects = async (req, res) => {
       suspects = await Alert.getActiveSuspects();
     }
 
-    // Transform suspects data for frontend
     const transformedSuspects = suspects
       .slice(skip, skip + parseInt(limit))
       .map((alert) => {
@@ -197,60 +195,16 @@ const getAllSuspects = async (req, res) => {
         return {
           id: suspectData.suspectId || alert._id,
           name: guestData.name || "Unknown",
-          aadhar: guestData.aadhar || "Not Available",
           phone: guestData.phone || "Not Available",
-          vehicle: guestData.vehicle || "",
-          photo: guestData.photo || "/placeholder-avatar.jpg",
-          email: guestData.email || "",
-          age: guestData.age || null,
-          occupation: guestData.occupation || "",
-          address: guestData.address || "",
           dateAdded: alert.createdAt,
-
-          // Suspect-specific fields
           isSuspect: suspectData.isSuspect || false,
           isDeleted: suspectData.suspectDeleted || false,
-          deletedAt: suspectData.suspectDeletedAt,
-          deletedBy: suspectData.suspectDeletedBy,
-          deletionReason: suspectData.deletionReason,
-
-          // Alert information
           alertStatus: alert.status,
           alertPriority: alert.priority,
-          alertId: alert._id,
-
-          // Associated alerts
-          associatedAlerts: [
-            {
-              id: alert._id,
-              title: alert.title,
-              type: alert.type,
-              priority: alert.priority,
-              status: alert.status,
-              date: alert.createdAt,
-              location: alert.location
-                ? `Room ${alert.location.roomNumber}${
-                    alert.location.floor
-                      ? `, Floor ${alert.location.floor}`
-                      : ""
-                  }`
-                : "Unknown",
-            },
-          ],
-
-          // Last seen information
-          lastSeen: {
-            location: alert.location
-              ? `Room ${alert.location.roomNumber}`
-              : "Unknown",
-            date: alert.createdAt,
-            reportedBy: alert.createdBy?.name || "System",
-          },
         };
       });
 
     const totalCount = suspects.length;
-    const totalPages = Math.ceil(totalCount / parseInt(limit));
 
     res.json({
       success: true,
@@ -258,13 +212,9 @@ const getAllSuspects = async (req, res) => {
         suspects: transformedSuspects,
         pagination: {
           currentPage: parseInt(page),
-          totalPages,
+          totalPages: Math.ceil(totalCount / parseInt(limit)),
           totalCount,
-          hasNextPage: parseInt(page) < totalPages,
-          hasPrevPage: parseInt(page) > 1,
-          limit: parseInt(limit),
         },
-        showingDeleted: showDeleted,
       },
     });
   } catch (error) {
@@ -272,18 +222,17 @@ const getAllSuspects = async (req, res) => {
     res.status(500).json({
       success: false,
       error: "Failed to fetch suspects",
-      message: error.message,
     });
   }
 };
 
-// ⭐ NEW: Restore deleted suspect (Admin only)
+// ========== RESTORE SUSPECT ========== //
 const restoreSuspect = async (req, res) => {
   try {
     if (req.user?.policeRole !== "admin_police") {
       return res.status(403).json({
         success: false,
-        error: "Access denied. Admin police role required.",
+        error: "Admin police role required.",
       });
     }
 
@@ -303,13 +252,14 @@ const restoreSuspect = async (req, res) => {
 
     const result = await Alert.restoreSuspect(suspectId);
 
-    // Log suspect restoration activity
+    // ✅ Log suspect restoration
     await logActivity(
       req.user.policeId.toString(),
-      "suspect_restored",
+      "suspect_updated",
       "suspect",
       suspectId,
       {
+        action: "restored",
         suspectName: suspectAlert.suspectDetails?.suspectBackup?.name,
         restoredBy: req.user.name,
         alertsAffected: result.modifiedCount,
@@ -317,81 +267,56 @@ const restoreSuspect = async (req, res) => {
       req
     );
 
+    console.log(`✅ Suspect restored: ${suspectId}`);
+
     res.json({
       success: true,
       message: "Suspect restored successfully",
-      restoredSuspect: {
-        suspectId: suspectId,
-        name: suspectAlert.suspectDetails?.suspectBackup?.name,
-        restoredAt: new Date(),
-        restoredBy: req.user.name,
-        alertsAffected: result.modifiedCount,
-      },
     });
   } catch (error) {
     console.error("Restore suspect error:", error);
     res.status(500).json({
       success: false,
       error: "Failed to restore suspect",
-      message: error.message,
     });
   }
 };
 
-// Create new alert - UPDATED with duplicate prevention
+// ========== CREATE ALERT WITH ENHANCED VALIDATION ========== //
 const createAlert = async (req, res) => {
   try {
-    const {
-      guestId,
-      type,
-      priority = "Medium",
-      title,
-      description,
-      location,
-      attachments,
-      assignedTo,
-    } = req.body;
+    const { guestId, type, priority, title, description, location } = req.body;
 
-    // Validate required fields
-    if (!guestId || !type || !title || !description || !location?.roomNumber) {
+    // Validation
+    if (!guestId || !type || !priority || !title) {
       return res.status(400).json({
-        error: "Missing required fields",
-        required: [
-          "guestId",
-          "type",
-          "title",
-          "description",
-          "location.roomNumber",
-        ],
+        success: false,
+        error: "Missing required fields: guestId, type, priority, title",
       });
     }
 
-    // Verify guest belongs to hotel
-    const guest = await Guest.findOne({
-      _id: guestId,
-      hotelId: req.hotelId,
-    });
-
+    // Get guest details
+    const guest = await Guest.findById(guestId);
     if (!guest) {
       return res.status(404).json({
-        error: "Guest not found or doesn't belong to your hotel",
+        success: false,
+        error: "Guest not found",
       });
     }
 
-    // Check for existing unresolved alerts for this guest
+    // ⭐ NEW: Check for existing unresolved alerts
     const existingUnresolvedAlerts = await Alert.find({
       guestId: guestId,
       hotelId: req.hotelId,
       status: {
         $nin: ["Resolved", "Cancelled"],
       },
-      isActive: true,
     }).populate("guestId", "name roomNumber phone");
 
     if (existingUnresolvedAlerts.length > 0) {
-      // Log the attempt to create duplicate alert
+      // ✅ Log blocked alert creation
       await logActivity(
-        req.user?.policeId || "hotel_staff",
+        req.user.id.toString(),
         "alert_creation_blocked",
         "alert",
         `blocked_${guestId}`,
@@ -400,13 +325,6 @@ const createAlert = async (req, res) => {
           guestName: guest.name,
           guestId: guestId,
           existingAlertsCount: existingUnresolvedAlerts.length,
-          existingAlerts: existingUnresolvedAlerts.map((alert) => ({
-            id: alert._id,
-            title: alert.title,
-            status: alert.status,
-            priority: alert.priority,
-            createdAt: alert.createdAt,
-          })),
           attemptedAlert: {
             type,
             priority,
@@ -418,169 +336,115 @@ const createAlert = async (req, res) => {
       );
 
       return res.status(409).json({
+        success: false,
         error: "Cannot create new alert",
-        message: `Guest ${guest.name} already has ${existingUnresolvedAlerts.length} unresolved alert(s). Please resolve existing alerts before creating a new one.`,
+        message: `Guest ${guest.name} already has ${existingUnresolvedAlerts.length} unresolved alert(s).`,
         existingAlerts: existingUnresolvedAlerts.map((alert) => ({
           id: alert._id,
           title: alert.title,
           status: alert.status,
           priority: alert.priority,
-          type: alert.type,
-          createdAt: alert.createdAt,
-          location: alert.location,
         })),
-        guest: {
-          id: guest._id,
-          name: guest.name,
-          roomNumber: guest.roomNumber,
-          phone: guest.phone,
-        },
       });
     }
 
-    // Continue with alert creation
+    // Get hotel details
+    const hotel = await Hotel.findById(req.hotelId);
+
+    // Create alert
     const alert = new Alert({
-      hotelId: req.hotelId,
       guestId,
+      hotelId: req.hotelId,
       type,
-      priority,
+      priority:
+        priority.charAt(0).toUpperCase() + priority.slice(1).toLowerCase(),
       title: title.trim(),
-      description: description.trim(),
+      description: description?.trim() || "",
+      status: "Pending",
       location: {
-        roomNumber: location.roomNumber,
-        floor: location.floor,
-        building: location.building,
-        coordinates: location.coordinates,
+        roomNumber: location?.roomNumber || guest.roomNumber || "Unknown",
+        floor: location?.floor,
+        building: location?.building,
       },
-      attachments: attachments || [],
-      assignedTo,
-      createdBy: {
-        name: "Hotel Staff",
-        role: "Hotel Staff",
+      guest: {
+        id: guest._id,
+        name: guest.name,
+        roomNumber: guest.roomNumber,
+        phone: guest.phone,
+        email: guest.email,
       },
+      hotel: hotel
+        ? {
+            id: hotel._id,
+            name: hotel.name,
+            address: hotel.address,
+            phone: hotel.phone,
+          }
+        : undefined,
       timeline: [
         {
-          action: "Created",
+          action: "Alert Created",
           performedBy: {
-            name: "Hotel Staff",
-            role: "Hotel Staff",
+            name: hotel?.name || "Hotel Staff",
+            role: "Hotel",
           },
           timestamp: new Date(),
-          notes: "Alert created - no existing unresolved alerts found",
+          notes: `Alert created: ${title}`,
         },
       ],
-      // ⭐ Initialize suspect details
       suspectDetails: {
         isSuspect: false,
         suspectId: null,
         suspectDeleted: false,
-        suspectDeletedAt: null,
-        suspectDeletedBy: null,
-        deletionReason: null,
-        suspectBackup: null,
       },
     });
 
-    // If assigned to someone, add assignment to timeline
-    if (assignedTo) {
-      alert.timeline.push({
-        action: "Assigned",
-        performedBy: {
-          name: "Hotel Staff",
-          role: "Hotel Staff",
-        },
-        timestamp: new Date(),
-        notes: `Assigned to ${assignedTo.name}`,
-      });
-    }
-
     await alert.save();
 
-    // Log successful alert creation
+    // ⭐ LOG ACTIVITY - Alert Created
     await logActivity(
-      req.user?.policeId || "hotel_staff",
+      req.user.id.toString(),
       "alert_created",
       "alert",
-      alert._id,
+      alert._id.toString(),
       {
-        alertType: alert.type,
-        priority: alert.priority,
-        title: alert.title,
+        alertId: alert._id.toString(),
+        suspectId: guestId.toString(),
+        guestId: guestId.toString(),
         guestName: guest.name,
-        roomNumber: location.roomNumber,
-        assignedTo: assignedTo?.name,
-        hotelId: req.hotelId,
-        isNewGuest: !guest.alertsSent || guest.alertsSent.length === 0,
+        priority: alert.priority,
+        type: alert.type,
+        title: alert.title,
+        status: alert.status,
+        hotelId: req.hotelId.toString(),
+        hotelName: hotel?.name,
+        roomNumber: guest.roomNumber,
       },
       req
     );
 
-    // Add alert to guest's record
-    if (!guest.alertsSent) {
-      guest.alertsSent = [];
-    }
-
-    guest.alertsSent.push({
-      type,
-      sentAt: new Date(),
-      reason: title,
-      status: "Sent",
-    });
-
-    await guest.save();
-
-    // Populate guest info for response
-    await alert.populate("guestId", "name roomNumber phone");
+    console.log("✅ Alert created and logged:", alert._id);
 
     res.status(201).json({
+      success: true,
       message: "Alert created successfully",
-      alert: {
-        id: alert._id,
-        type: alert.type,
-        priority: alert.priority,
-        title: alert.title,
-        description: alert.description,
-        status: alert.status,
-        location: alert.location,
-        guest: {
-          id: alert.guestId._id,
-          name: alert.guestId.name,
-          roomNumber: alert.guestId.roomNumber,
-          phone: alert.guestId.phone,
-        },
-        assignedTo: alert.assignedTo,
-        createdAt: alert.createdAt,
-        suspectDetails: alert.suspectDetails,
-      },
+      alert,
     });
   } catch (error) {
     console.error("Create alert error:", error);
-
-    if (error.name === "ValidationError") {
-      const messages = Object.values(error.errors).map((err) => err.message);
-      return res.status(400).json({
-        error: "Validation failed",
-        details: messages,
-      });
-    }
-
     res.status(500).json({
+      success: false,
       error: "Failed to create alert",
-      details: error.message,
+      message: error.message,
     });
   }
 };
 
-// Update alert status - UPDATED with activity logging
+// Update alert status with activity logging
 const updateAlertStatus = async (req, res) => {
   try {
-    const { status, notes, resolution } = req.body;
-
-    if (!status) {
-      return res.status(400).json({
-        error: "Status is required",
-      });
-    }
+    const { id } = req.params;
+    const { status, notes } = req.body;
 
     const validStatuses = [
       "Pending",
@@ -591,233 +455,497 @@ const updateAlertStatus = async (req, res) => {
     ];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({
-        error: "Invalid status",
-        validStatuses,
+        success: false,
+        error: `Invalid status. Must be one of: ${validStatuses.join(", ")}`,
       });
     }
 
-    const alert = await Alert.findOne({
-      _id: req.params.id,
-      hotelId: req.hotelId,
-    });
-
+    const alert = await Alert.findById(id);
     if (!alert) {
       return res.status(404).json({
+        success: false,
         error: "Alert not found",
       });
     }
 
+    // Store previous status for activity log
     const previousStatus = alert.status;
+    const previousStatusUpdatedAt = alert.statusUpdatedAt;
 
-    // Update status
+    // Update alert
     alert.status = status;
+    alert.statusUpdatedAt = new Date();
 
-    // Add timeline entry
+    // Add to timeline
     alert.timeline.push({
-      action: status,
+      action: `Status Updated to ${status}`,
       performedBy: {
-        name: req.user?.name || "Hotel Staff",
-        role: req.user?.policeRole
-          ? `Police - ${req.user.rank}`
-          : "Hotel Staff",
+        userId: req.user?.policeId || req.user?.id,
+        name: req.user?.name || "Police Officer",
+        role: req.user?.policeRole || "Police",
       },
       timestamp: new Date(),
-      notes: notes || `Status changed to ${status}`,
+      notes: notes || `Status changed from ${previousStatus} to ${status}`,
     });
-
-    // Handle resolution
-    if (status === "Resolved") {
-      alert.resolution = {
-        summary: resolution?.summary || "Alert resolved",
-        resolvedBy: {
-          name: req.user?.name || "Hotel Staff",
-          role: req.user?.policeRole
-            ? `Police - ${req.user.rank}`
-            : "Hotel Staff",
-        },
-        resolvedAt: new Date(),
-        actionsTaken: resolution?.actionsTaken || [],
-      };
-    }
 
     await alert.save();
 
-    // Log alert status update activity
+    // ⭐ LOG ACTIVITY - Status Update
     await logActivity(
-      req.user?.policeId || "hotel_staff",
-      "alert_updated",
+      (req.user?.policeId || req.user?.id).toString(),
+      "alert_status_updated",
       "alert",
-      alert._id,
+      alert._id.toString(),
       {
-        alertTitle: alert.title,
+        alertId: alert._id.toString(),
+        suspectId: alert.guestId.toString(),
+        guestId: alert.guestId.toString(),
+        guestName: alert.guest?.name,
         previousStatus,
         newStatus: status,
-        notes: notes,
-        resolvedBy: req.user?.name,
-        isResolution: status === "Resolved",
+        statusChange: `${previousStatus} → ${status}`,
+        updatedBy: req.user?.name || "Police Officer",
+        notes: notes || "",
+        priority: alert.priority,
+        type: alert.type,
+        title: alert.title,
       },
       req
     );
 
+    // ⭐ LOG SPECIFIC STATUS ACTIONS
+    if (status === "Acknowledged") {
+      await logActivity(
+        (req.user?.policeId || req.user?.id).toString(),
+        "alert_acknowledged",
+        "alert",
+        alert._id.toString(),
+        {
+          alertId: alert._id.toString(),
+          suspectId: alert.guestId.toString(),
+          guestName: alert.guest?.name,
+          acknowledgedBy: req.user?.name,
+          acknowledgedAt: new Date(),
+        },
+        req
+      );
+    } else if (status === "Resolved") {
+      await logActivity(
+        (req.user?.policeId || req.user?.id).toString(),
+        "alert_resolved",
+        "alert",
+        alert._id.toString(),
+        {
+          alertId: alert._id.toString(),
+          suspectId: alert.guestId.toString(),
+          guestName: alert.guest?.name,
+          resolvedBy: req.user?.name,
+          resolvedAt: new Date(),
+          timeToResolve: previousStatusUpdatedAt
+            ? Math.floor((new Date() - previousStatusUpdatedAt) / 1000 / 60) // minutes
+            : null,
+        },
+        req
+      );
+    } else if (status === "Cancelled") {
+      await logActivity(
+        (req.user?.policeId || req.user?.id).toString(),
+        "alert_cancelled",
+        "alert",
+        alert._id.toString(),
+        {
+          alertId: alert._id.toString(),
+          suspectId: alert.guestId.toString(),
+          guestName: alert.guest?.name,
+          cancelledBy: req.user?.name,
+          cancelledAt: new Date(),
+          reason: notes || "No reason provided",
+        },
+        req
+      );
+    }
+
+    // ⭐ If alert has suspect details, log to suspect activities too
+    if (alert.suspectDetails?.isSuspect && alert.suspectDetails?.suspectId) {
+      await logActivity(
+        (req.user?.policeId || req.user?.id).toString(),
+        "suspect_status_updated",
+        "suspect",
+        alert.suspectDetails.suspectId,
+        {
+          relatedAlert: alert._id.toString(),
+          alertTitle: alert.title,
+          statusChange: `${previousStatus} → ${status}`,
+          action: `Related alert status updated to ${status}`,
+          performedBy: req.user?.name,
+          notes: notes || "",
+        },
+        req
+      );
+    }
+
+    console.log(`✅ Alert status updated: ${previousStatus} → ${status}`);
+
     res.json({
-      message: `Alert status updated to ${status}`,
-      alert: {
-        id: alert._id,
-        title: alert.title,
-        status: alert.status,
-        updatedAt: alert.updatedAt,
-        resolution: alert.resolution,
+      success: true,
+      message: "Alert status updated successfully",
+      alert,
+      changes: {
+        previousStatus,
+        newStatus: status,
+        updatedBy: req.user?.name,
       },
     });
   } catch (error) {
     console.error("Update alert status error:", error);
     res.status(500).json({
+      success: false,
       error: "Failed to update alert status",
+      message: error.message,
     });
   }
 };
 
-// Delete alert - UPDATED with activity logging
-const deleteAlert = async (req, res) => {
+// ========== GET ALERT ACTIVITIES (FOR SUSPECT PROFILE) ========== //
+const getAlertActivities = async (req, res) => {
   try {
-    const alert = await Alert.findOneAndDelete({
-      _id: req.params.id,
-      hotelId: req.hotelId,
-    });
+    const { id } = req.params;
+    const { limit = 20 } = req.query;
 
+    const alert = await Alert.findById(id);
     if (!alert) {
       return res.status(404).json({
+        success: false,
         error: "Alert not found",
       });
     }
 
-    // Log alert deletion activity
+    // Get activities from ActivityLog for this alert
+    const activities = await ActivityLog.find({
+      $or: [{ targetId: id }, { "details.alertId": id }],
+      action: { $ne: "logging_failed" },
+    })
+      .populate("performedBy", "name badgeNumber rank")
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .lean();
+
+    // Format activities for display
+    const formattedActivities = activities.map((activity) => ({
+      _id: activity._id,
+      action: activity.action,
+      description: formatActivityDescription(activity),
+      performedBy: activity.performedBy?.name || "Unknown",
+      performedByBadge: activity.performedBy?.badgeNumber,
+      timestamp: activity.createdAt,
+      details: activity.details,
+      severity: activity.severity,
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        alertId: id,
+        activities: formattedActivities,
+        count: formattedActivities.length,
+      },
+    });
+  } catch (error) {
+    console.error("Get alert activities error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch alert activities",
+      message: error.message,
+    });
+  }
+};
+
+// Helper function to format activity descriptions
+function formatActivityDescription(activity) {
+  switch (activity.action) {
+    case "alert_created":
+      return `Alert created: ${activity.details?.title || "New alert"}`;
+    case "alert_status_updated":
+      return `Status updated to ${activity.details?.newStatus || "Unknown"}`;
+    case "alert_acknowledged":
+      return `Alert acknowledged`;
+    case "alert_resolved":
+      return `Alert resolved`;
+    case "alert_cancelled":
+      return `Alert cancelled: ${activity.details?.reason || "No reason"}`;
+    case "alert_assigned":
+      return `Assigned to ${activity.details?.assignedTo || "Officer"}`;
+    default:
+      return activity.action
+        .split("_")
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(" ");
+  }
+}
+
+// Assign alert to officer with activity logging
+const assignAlert = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { officerId, officerName, officerRank, notes } = req.body;
+
+    if (!officerId || !officerName) {
+      return res.status(400).json({
+        success: false,
+        error: "Officer ID and name are required",
+      });
+    }
+
+    const alert = await Alert.findById(id);
+    if (!alert) {
+      return res.status(404).json({
+        success: false,
+        error: "Alert not found",
+      });
+    }
+
+    // Store previous assignment
+    const previousAssignment = alert.assignedTo;
+
+    // Update assignment
+    alert.assignedTo = {
+      userId: officerId,
+      name: officerName,
+      role: officerRank || "Police Officer",
+    };
+
+    // Add to timeline
+    alert.timeline.push({
+      action: "Alert Assigned",
+      performedBy: {
+        userId: req.user?.policeId || req.user?.id,
+        name: req.user?.name || "Admin",
+        role: req.user?.policeRole || "Police",
+      },
+      timestamp: new Date(),
+      notes: notes || `Alert assigned to ${officerName}`,
+    });
+
+    await alert.save();
+
+    // ⭐ LOG ACTIVITY - Alert Assignment
     await logActivity(
-      req.user?.policeId || "hotel_staff",
-      "alert_removed",
+      (req.user?.policeId || req.user?.id).toString(),
+      "alert_assigned",
       "alert",
-      alert._id,
+      alert._id.toString(),
       {
-        alertTitle: alert.title,
-        alertType: alert.type,
+        alertId: alert._id.toString(),
+        suspectId: alert.guestId.toString(),
+        guestName: alert.guest?.name,
+        assignedTo: officerName,
+        assignedToId: officerId,
+        assignedBy: req.user?.name,
+        previousAssignment: previousAssignment?.name || "Unassigned",
         priority: alert.priority,
-        deletedBy: req.user?.name || "Hotel Staff",
+        type: alert.type,
+      },
+      req
+    );
+
+    console.log(`✅ Alert assigned to ${officerName}`);
+
+    res.json({
+      success: true,
+      message: "Alert assigned successfully",
+      alert,
+    });
+  } catch (error) {
+    console.error("Assign alert error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to assign alert",
+      message: error.message,
+    });
+  }
+};
+
+// Add timeline entry with activity logging
+const addTimelineEntry = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { action, notes } = req.body;
+
+    if (!action) {
+      return res.status(400).json({
+        success: false,
+        error: "Action is required",
+      });
+    }
+
+    const alert = await Alert.findById(id);
+    if (!alert) {
+      return res.status(404).json({
+        success: false,
+        error: "Alert not found",
+      });
+    }
+
+    // Add timeline entry
+    const timelineEntry = {
+      action,
+      performedBy: {
+        userId: req.user?.policeId || req.user?.id,
+        name: req.user?.name || "Officer",
+        role: req.user?.policeRole || "Police",
+      },
+      timestamp: new Date(),
+      notes: notes || "",
+    };
+
+    alert.timeline.push(timelineEntry);
+    await alert.save();
+
+    // ⭐ LOG ACTIVITY - Timeline Entry Added
+    await logActivity(
+      (req.user?.policeId || req.user?.id).toString(),
+      "alert_updated",
+      "alert",
+      alert._id.toString(),
+      {
+        alertId: alert._id.toString(),
+        suspectId: alert.guestId.toString(),
+        guestName: alert.guest?.name,
+        updateType: "timeline_entry",
+        action,
+        notes,
+        updatedBy: req.user?.name,
       },
       req
     );
 
     res.json({
-      message: "Alert deleted successfully",
-      deletedAlert: {
-        id: alert._id,
-        title: alert.title,
-        deletedAt: new Date(),
-      },
+      success: true,
+      message: "Timeline entry added successfully",
+      timeline: alert.timeline,
     });
   } catch (error) {
-    console.error("Delete alert error:", error);
+    console.error("Add timeline entry error:", error);
     res.status(500).json({
-      error: "Failed to delete alert",
+      success: false,
+      error: "Failed to add timeline entry",
+      message: error.message,
     });
   }
 };
 
-// Get all alerts
+// Delete alert with activity logging
+const deleteAlert = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const alert = await Alert.findById(id);
+    if (!alert) {
+      return res.status(404).json({
+        success: false,
+        error: "Alert not found",
+      });
+    }
+
+    // Store alert data before deletion
+    const alertData = {
+      alertId: alert._id.toString(),
+      suspectId: alert.guestId.toString(),
+      guestName: alert.guest?.name,
+      title: alert.title,
+      type: alert.type,
+      priority: alert.priority,
+      status: alert.status,
+    };
+
+    await Alert.findByIdAndDelete(id);
+
+    // ⭐ LOG ACTIVITY - Alert Deleted
+    await logActivity(
+      (req.user?.policeId || req.user?.id || req.user?.hotelId).toString(),
+      "alert_removed",
+      "alert",
+      id,
+      {
+        ...alertData,
+        deletedBy: req.user?.name || "User",
+        deletedAt: new Date(),
+      },
+      req
+    );
+
+    console.log(`✅ Alert deleted: ${id}`);
+
+    res.json({
+      success: true,
+      message: "Alert deleted successfully",
+    });
+  } catch (error) {
+    console.error("Delete alert error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to delete alert",
+      message: error.message,
+    });
+  }
+};
+
+// Get all alerts with optional filters
 const getAllAlerts = async (req, res) => {
   try {
     const {
       page = 1,
       limit = 20,
-      status = "all",
-      priority = "all",
-      type = "all",
-      sortBy = "createdAt",
-      sortOrder = "desc",
+      status,
+      priority,
+      type,
+      guestId,
+      search,
     } = req.query;
 
-    // Build query
-    const query = { hotelId: req.hotelId };
+    // Build filter
+    const filter = {};
+    if (status && status !== "all") filter.status = status;
+    if (priority && priority !== "all") filter.priority = priority;
+    if (type && type !== "all") filter.type = type;
+    if (guestId) filter.guestId = guestId;
 
-    // Filter by status
-    if (status === "active") {
-      query.isActive = true;
-    } else if (status === "resolved") {
-      query.status = "Resolved";
-    } else if (status === "pending") {
-      query.status = "Pending";
+    // Search in title or description
+    if (search) {
+      filter.$or = [
+        { title: { $regex: search, $options: "i" } },
+        { description: { $regex: search, $options: "i" } },
+        { "guest.name": { $regex: search, $options: "i" } },
+      ];
     }
 
-    // Filter by priority
-    if (priority !== "all") {
-      query.priority =
-        priority.charAt(0).toUpperCase() + priority.slice(1).toLowerCase();
-    }
-
-    // Filter by type
-    if (type !== "all") {
-      query.type = type.charAt(0).toUpperCase() + type.slice(1).toLowerCase();
-    }
-
-    // Sorting
-    const sort = {};
-    if (sortBy === "priority") {
-      // Custom priority sorting: Critical > High > Medium > Low
-      sort.priority = sortOrder === "asc" ? 1 : -1;
-      sort.createdAt = -1; // Secondary sort by creation date
-    } else {
-      sort[sortBy] = sortOrder === "asc" ? 1 : -1;
-    }
-
-    // Pagination
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    const [alerts, totalCount] = await Promise.all([
-      Alert.find(query)
-        .populate("guestId", "name roomNumber phone")
-        .sort(sort)
+    const [alerts, total] = await Promise.all([
+      Alert.find(filter)
+        .sort({ createdAt: -1 })
         .skip(skip)
-        .limit(parseInt(limit)),
-      Alert.countDocuments(query),
+        .limit(parseInt(limit))
+        .lean(),
+      Alert.countDocuments(filter),
     ]);
 
     res.json({
-      alerts: alerts.map((alert) => ({
-        id: alert._id,
-        type: alert.type,
-        priority: alert.priority,
-        title: alert.title,
-        description: alert.description,
-        status: alert.status,
-        location: alert.location,
-        guest: alert.guestId
-          ? {
-              id: alert.guestId._id,
-              name: alert.guestId.name,
-              roomNumber: alert.guestId.roomNumber,
-              phone: alert.guestId.phone,
-            }
-          : null,
-        assignedTo: alert.assignedTo,
-        createdAt: alert.createdAt,
-        age: alert.age,
-        responseTime: alert.responseTime,
-        isActive: alert.isActive,
-        // ⭐ Include suspect information
-        suspectDetails: alert.suspectDetails,
-        suspectStatus: alert.suspectStatus,
-      })),
+      success: true,
+      alerts,
       pagination: {
-        currentPage: parseInt(page),
-        totalPages: Math.ceil(totalCount / parseInt(limit)),
-        totalAlerts: totalCount,
-        hasNext: skip + parseInt(limit) < totalCount,
-        hasPrev: parseInt(page) > 1,
+        total,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        pages: Math.ceil(total / parseInt(limit)),
       },
     });
   } catch (error) {
-    console.error("Get all alerts error:", error);
+    console.error("Get alerts error:", error);
     res.status(500).json({
+      success: false,
       error: "Failed to fetch alerts",
+      message: error.message,
     });
   }
 };
@@ -825,167 +953,74 @@ const getAllAlerts = async (req, res) => {
 // Get alert by ID
 const getAlertById = async (req, res) => {
   try {
-    const alert = await Alert.findOne({
-      _id: req.params.id,
-      hotelId: req.hotelId,
-    }).populate("guestId", "name roomNumber phone email address");
+    const { id } = req.params;
 
+    const alert = await Alert.findById(id);
     if (!alert) {
       return res.status(404).json({
+        success: false,
         error: "Alert not found",
       });
     }
 
     res.json({
-      alert: {
-        id: alert._id,
-        type: alert.type,
-        priority: alert.priority,
-        title: alert.title,
-        description: alert.description,
-        status: alert.status,
-        location: alert.location,
-        guest: alert.guestId
-          ? {
-              id: alert.guestId._id,
-              name: alert.guestId.name,
-              roomNumber: alert.guestId.roomNumber,
-              phone: alert.guestId.phone,
-              email: alert.guestId.email,
-              address: alert.guestId.address,
-            }
-          : null,
-        assignedTo: alert.assignedTo,
-        createdBy: alert.createdBy,
-        timeline: alert.timeline,
-        attachments: alert.attachments,
-        resolution: alert.resolution,
-        relatedAlerts: alert.relatedAlerts,
-        createdAt: alert.createdAt,
-        updatedAt: alert.updatedAt,
-        age: alert.age,
-        responseTime: alert.responseTime,
-        isActive: alert.isActive,
-        // ⭐ Include suspect information
-        suspectDetails: alert.suspectDetails,
-        suspectStatus: alert.suspectStatus,
-      },
+      success: true,
+      alert,
     });
   } catch (error) {
     console.error("Get alert by ID error:", error);
     res.status(500).json({
-      error: "Failed to fetch alert details",
+      success: false,
+      error: "Failed to fetch alert",
+      message: error.message,
     });
   }
 };
 
-// Assign alert
-const assignAlert = async (req, res) => {
+// Get alerts by guest/suspect ID
+const getAlertsByGuest = async (req, res) => {
   try {
-    const { assignedTo, notes } = req.body;
+    const { guestId } = req.params;
 
-    if (!assignedTo || !assignedTo.name) {
-      return res.status(400).json({
-        error: "Assigned person's name is required",
-      });
-    }
-
-    const alert = await Alert.findOne({
-      _id: req.params.id,
-      hotelId: req.hotelId,
-    });
-
-    if (!alert) {
-      return res.status(404).json({
-        error: "Alert not found",
-      });
-    }
-
-    // Update assignment
-    alert.assignedTo = {
-      name: assignedTo.name,
-      role: assignedTo.role || "Staff",
-      contactNumber: assignedTo.contactNumber,
-      assignedAt: new Date(),
-    };
-
-    // Add timeline entry
-    alert.timeline.push({
-      action: "Assigned",
-      performedBy: {
-        name: req.user?.name || "Hotel Staff",
-        role: req.user?.policeRole
-          ? `Police - ${req.user.rank}`
-          : "Hotel Staff",
-      },
-      timestamp: new Date(),
-      notes: notes || `Assigned to ${assignedTo.name}`,
-    });
-
-    await alert.save();
+    const alerts = await Alert.find({ guestId }).sort({ createdAt: -1 }).lean();
 
     res.json({
-      message: "Alert assigned successfully",
-      alert: {
-        id: alert._id,
-        title: alert.title,
-        assignedTo: alert.assignedTo,
-        updatedAt: alert.updatedAt,
-      },
+      success: true,
+      alerts,
+      count: alerts.length,
     });
   } catch (error) {
-    console.error("Assign alert error:", error);
+    console.error("Get alerts by guest error:", error);
     res.status(500).json({
-      error: "Failed to assign alert",
+      success: false,
+      error: "Failed to fetch alerts",
+      message: error.message,
     });
   }
 };
 
-// Add timeline entry
-const addTimelineEntry = async (req, res) => {
+// Check if guest has active alerts
+const checkGuestAlertStatus = async (req, res) => {
   try {
-    const { action, notes } = req.body;
+    const { guestId } = req.params;
 
-    if (!action) {
-      return res.status(400).json({
-        error: "Action is required",
-      });
-    }
-
-    const alert = await Alert.findOne({
-      _id: req.params.id,
-      hotelId: req.hotelId,
-    });
-
-    if (!alert) {
-      return res.status(404).json({
-        error: "Alert not found",
-      });
-    }
-
-    // Add timeline entry
-    alert.timeline.push({
-      action,
-      performedBy: {
-        name: req.user?.name || "Hotel Staff",
-        role: req.user?.policeRole
-          ? `Police - ${req.user.rank}`
-          : "Hotel Staff",
-      },
-      timestamp: new Date(),
-      notes: notes || "",
-    });
-
-    await alert.save();
+    const activeAlerts = await Alert.find({
+      guestId,
+      status: { $nin: ["Resolved", "Cancelled"] },
+    }).lean();
 
     res.json({
-      message: "Timeline entry added successfully",
-      timelineEntry: alert.timeline[alert.timeline.length - 1],
+      success: true,
+      hasActiveAlerts: activeAlerts.length > 0,
+      activeAlertCount: activeAlerts.length,
+      alerts: activeAlerts,
     });
   } catch (error) {
-    console.error("Add timeline entry error:", error);
+    console.error("Check guest alert status error:", error);
     res.status(500).json({
-      error: "Failed to add timeline entry",
+      success: false,
+      error: "Failed to check alert status",
+      message: error.message,
     });
   }
 };
@@ -993,188 +1028,63 @@ const addTimelineEntry = async (req, res) => {
 // Get alert statistics
 const getAlertStats = async (req, res) => {
   try {
-    const { period = "30" } = req.query;
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - parseInt(period));
-
-    const [
-      totalAlerts,
-      activeAlerts,
-      alertsByStatus,
-      alertsByPriority,
-      alertsByType,
-      responseTimeStats,
-    ] = await Promise.all([
-      Alert.countDocuments({ hotelId: req.hotelId }),
-      Alert.countDocuments({ hotelId: req.hotelId, isActive: true }),
-      Alert.aggregate([
-        { $match: { hotelId: req.hotelId } },
-        { $group: { _id: "$status", count: { $sum: 1 } } },
-      ]),
-      Alert.aggregate([
-        { $match: { hotelId: req.hotelId } },
-        { $group: { _id: "$priority", count: { $sum: 1 } } },
-      ]),
-      Alert.aggregate([
-        { $match: { hotelId: req.hotelId } },
-        { $group: { _id: "$type", count: { $sum: 1 } } },
-      ]),
-      Alert.aggregate([
-        {
-          $match: {
-            hotelId: req.hotelId,
-            status: { $ne: "Pending" },
-            createdAt: { $gte: startDate },
+    const stats = await Alert.aggregate([
+      {
+        $group: {
+          _id: null,
+          total: { $sum: 1 },
+          pending: {
+            $sum: { $cond: [{ $eq: ["$status", "Pending"] }, 1, 0] },
+          },
+          acknowledged: {
+            $sum: { $cond: [{ $eq: ["$status", "Acknowledged"] }, 1, 0] },
+          },
+          inProgress: {
+            $sum: { $cond: [{ $eq: ["$status", "In Progress"] }, 1, 0] },
+          },
+          resolved: {
+            $sum: { $cond: [{ $eq: ["$status", "Resolved"] }, 1, 0] },
+          },
+          cancelled: {
+            $sum: { $cond: [{ $eq: ["$status", "Cancelled"] }, 1, 0] },
+          },
+          critical: {
+            $sum: { $cond: [{ $eq: ["$priority", "Critical"] }, 1, 0] },
+          },
+          high: {
+            $sum: { $cond: [{ $eq: ["$priority", "High"] }, 1, 0] },
+          },
+          medium: {
+            $sum: { $cond: [{ $eq: ["$priority", "Medium"] }, 1, 0] },
+          },
+          low: {
+            $sum: { $cond: [{ $eq: ["$priority", "Low"] }, 1, 0] },
           },
         },
-        {
-          $addFields: {
-            firstResponse: {
-              $arrayElemAt: [
-                {
-                  $filter: {
-                    input: "$timeline",
-                    cond: {
-                      $in: ["$$this.action", ["Acknowledged", "In Progress"]],
-                    },
-                  },
-                },
-                0,
-              ],
-            },
-          },
-        },
-        {
-          $addFields: {
-            responseTimeHours: {
-              $divide: [
-                { $subtract: ["$firstResponse.timestamp", "$createdAt"] },
-                1000 * 60 * 60,
-              ],
-            },
-          },
-        },
-        {
-          $group: {
-            _id: null,
-            avgResponseTime: { $avg: "$responseTimeHours" },
-            minResponseTime: { $min: "$responseTimeHours" },
-            maxResponseTime: { $max: "$responseTimeHours" },
-          },
-        },
-      ]),
+      },
     ]);
 
-    // Format the statistics
-    const statusStats = alertsByStatus.reduce((acc, item) => {
-      acc[item._id] = item.count;
-      return acc;
-    }, {});
-
-    const priorityStats = alertsByPriority.reduce((acc, item) => {
-      acc[item._id] = item.count;
-      return acc;
-    }, {});
-
-    const typeStats = alertsByType.reduce((acc, item) => {
-      acc[item._id] = item.count;
-      return acc;
-    }, {});
-
     res.json({
-      period: `${period} days`,
-      summary: {
-        totalAlerts,
-        activeAlerts,
-        resolvedAlerts: statusStats.Resolved || 0,
-        pendingAlerts: statusStats.Pending || 0,
-        criticalAlerts: priorityStats.Critical || 0,
-      },
-      breakdown: {
-        byStatus: statusStats,
-        byPriority: priorityStats,
-        byType: typeStats,
-      },
-      responseTime: responseTimeStats[0] || {
-        avgResponseTime: 0,
-        minResponseTime: 0,
-        maxResponseTime: 0,
+      success: true,
+      stats: stats[0] || {
+        total: 0,
+        pending: 0,
+        acknowledged: 0,
+        inProgress: 0,
+        resolved: 0,
+        cancelled: 0,
+        critical: 0,
+        high: 0,
+        medium: 0,
+        low: 0,
       },
     });
   } catch (error) {
     console.error("Get alert stats error:", error);
     res.status(500).json({
+      success: false,
       error: "Failed to fetch alert statistics",
-    });
-  }
-};
-
-// Check guest alert status
-const checkGuestAlertStatus = async (req, res) => {
-  try {
-    const { guestId } = req.params;
-
-    // Verify guest belongs to hotel
-    const guest = await Guest.findOne({
-      _id: guestId,
-      hotelId: req.hotelId,
-    });
-
-    if (!guest) {
-      return res.status(404).json({
-        error: "Guest not found or doesn't belong to your hotel",
-      });
-    }
-
-    // Get all alerts for this guest
-    const alerts = await Alert.find({
-      guestId: guestId,
-      hotelId: req.hotelId,
-    }).sort({ createdAt: -1 });
-
-    const unresolvedAlerts = alerts.filter(
-      (alert) =>
-        !["Resolved", "Cancelled"].includes(alert.status) && alert.isActive
-    );
-
-    const resolvedAlerts = alerts.filter((alert) =>
-      ["Resolved", "Cancelled"].includes(alert.status)
-    );
-
-    res.json({
-      guest: {
-        id: guest._id,
-        name: guest.name,
-        roomNumber: guest.roomNumber,
-        phone: guest.phone,
-      },
-      canCreateNewAlert: unresolvedAlerts.length === 0,
-      alertsSummary: {
-        total: alerts.length,
-        unresolved: unresolvedAlerts.length,
-        resolved: resolvedAlerts.length,
-      },
-      unresolvedAlerts: unresolvedAlerts.map((alert) => ({
-        id: alert._id,
-        title: alert.title,
-        status: alert.status,
-        priority: alert.priority,
-        type: alert.type,
-        createdAt: alert.createdAt,
-      })),
-      lastResolvedAlert:
-        resolvedAlerts.length > 0
-          ? {
-              id: resolvedAlerts[0]._id,
-              title: resolvedAlerts[0].title,
-              resolvedAt: resolvedAlerts[0].resolution?.resolvedAt,
-            }
-          : null,
-    });
-  } catch (error) {
-    console.error("Check guest alert status error:", error);
-    res.status(500).json({
-      error: "Failed to check guest alert status",
+      message: error.message,
     });
   }
 };
@@ -1184,12 +1094,14 @@ module.exports = {
   getAllAlerts,
   getAlertById,
   updateAlertStatus,
-  assignAlert,
-  addTimelineEntry,
   deleteAlert,
   getAlertStats,
+  assignAlert,
+  addTimelineEntry,
   checkGuestAlertStatus,
-  // ⭐ NEW: Export suspect management functions
+  getAlertsByGuest,
+  getAlertActivities, // ⭐ NEW: For fetching alert activities
+  // ⭐ SUSPECT MANAGEMENT FUNCTIONS
   markAsSuspect,
   deleteSuspect,
   getAllSuspects,

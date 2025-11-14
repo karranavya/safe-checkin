@@ -1,15 +1,56 @@
-// controllers/activityController.js - ENHANCED WITH REAL STATISTICS
+// controllers/activityController.js - FIXED VERSION (No Recursive Errors)
 const ActivityLog = require("../models/ActivityLog");
 const Police = require("../models/Police");
 const mongoose = require("mongoose");
 
+// Track failed logging attempts to prevent recursion
+let failedLoggingAttempts = 0;
+const MAX_FAILED_ATTEMPTS = 5;
+const FAILED_ATTEMPT_RESET_TIME = 60000; // 1 minute
+
+// Reset failed attempts counter periodically
+setInterval(() => {
+  if (failedLoggingAttempts > 0) {
+    console.log(
+      `🔄 Resetting failed logging attempts: ${failedLoggingAttempts}`
+    );
+    failedLoggingAttempts = 0;
+  }
+}, FAILED_ATTEMPT_RESET_TIME);
+
 // Action mapping for backward compatibility
 const ACTION_MAPPING = {
+  // Alert actions
   alert_viewed: "alert_viewed",
   alert_creation_blocked: "alert_creation_blocked",
+  alert_acknowledged: "alert_acknowledged",
+  alert_resolved: "alert_resolved",
+  alert_status_updated: "alert_updated",
+  alert_cancelled: "alert_cancelled",
+  alert_assigned: "alert_assigned",
+
+  // Suspect actions
   suspect_viewed: "suspect_viewed",
+  suspect_verified: "suspect_verified",
+  suspect_status_updated: "suspect_status_updated",
+  suspect_notes_updated: "suspect_updated",
+  suspect_restored: "suspect_updated",
+
+  // Evidence actions
+  evidence_uploaded: "evidence_uploaded",
+  evidence_viewed: "evidence_viewed",
+  evidence_shared: "evidence_shared",
+  evidence_approved: "evidence_approved",
+  evidence_rejected: "evidence_rejected",
+  evidence_downloaded: "evidence_downloaded",
+
+  // Report actions
   report_viewed: "report_viewed",
+  report_generated: "report_generated",
+
+  // Dashboard actions
   dashboard_viewed: "dashboard_viewed",
+  statistics_viewed: "statistics_viewed",
 };
 
 // Helper function to determine severity based on action
@@ -26,15 +67,19 @@ const determineSeverity = (action, details = {}) => {
     hotel_registered: "high",
     hotel_verified: "high",
     suspect_added: "high",
+    suspect_verified: "high",
     alert_created: "high",
     alert_creation_blocked: "high",
     case_created: "high",
     password_changed: "high",
+    evidence_uploaded: "high",
 
     // Medium importance
     hotel_updated: "medium",
     suspect_updated: "medium",
+    suspect_status_updated: "medium",
     alert_updated: "medium",
+    alert_status_updated: "medium",
     alert_acknowledged: "medium",
     alert_resolved: "medium",
     report_generated: "medium",
@@ -53,11 +98,8 @@ const determineSeverity = (action, details = {}) => {
   };
 
   // Check if priority affects severity
-  if (details.priority === "Critical") {
-    return "critical";
-  } else if (details.priority === "High") {
-    return "high";
-  }
+  if (details.priority === "Critical") return "critical";
+  if (details.priority === "High") return "high";
 
   return severityMap[action] || "medium";
 };
@@ -75,10 +117,15 @@ const determineCategory = (action) => {
     // Security
     alert_created: "security",
     alert_updated: "security",
+    alert_acknowledged: "security",
     alert_resolved: "security",
+    alert_status_updated: "security",
     guest_flagged: "security",
     suspect_added: "security",
+    suspect_verified: "security",
+    suspect_status_updated: "security",
     alert_creation_blocked: "security",
+    evidence_uploaded: "security",
 
     // Reporting
     report_generated: "reporting",
@@ -102,7 +149,7 @@ const determineCategory = (action) => {
   return categoryMap[action] || "data_management";
 };
 
-// Log activity function - to be called from other controllers
+// ⭐ MAIN FIX: Improved logActivity function with error prevention
 const logActivity = async (
   performedBy,
   action,
@@ -112,6 +159,19 @@ const logActivity = async (
   req = null
 ) => {
   try {
+    // ✅ Prevent recursive logging failures
+    if (failedLoggingAttempts >= MAX_FAILED_ATTEMPTS) {
+      console.warn(
+        "⚠️ Too many failed logging attempts - skipping activity log"
+      );
+      return null;
+    }
+
+    // ✅ Skip logging for system/failed logs to prevent recursion
+    if (action === "logging_failed" || targetType === "system") {
+      return null;
+    }
+
     if (!performedBy || !action || !targetType || !targetId) {
       console.error("❌ Activity logging failed: Missing required parameters", {
         performedBy: !!performedBy,
@@ -119,16 +179,24 @@ const logActivity = async (
         targetType: !!targetType,
         targetId: !!targetId,
       });
+      failedLoggingAttempts++;
       return null;
     }
 
     // Convert performedBy to ObjectId if it's a valid string
     let performedByObjectId;
     try {
-      performedByObjectId = new mongoose.Types.ObjectId(performedBy);
+      if (mongoose.Types.ObjectId.isValid(performedBy)) {
+        performedByObjectId = new mongoose.Types.ObjectId(performedBy);
+      } else {
+        console.warn("⚠️ Invalid performedBy ObjectId:", performedBy);
+        failedLoggingAttempts++;
+        return null;
+      }
     } catch (error) {
-      console.error("❌ Invalid performedBy ObjectId:", performedBy);
-      performedByObjectId = performedBy; // Keep as string if conversion fails
+      console.error("❌ Error converting performedBy to ObjectId:", error);
+      failedLoggingAttempts++;
+      return null;
     }
 
     const mappedAction = ACTION_MAPPING[action] || action;
@@ -162,33 +230,18 @@ const logActivity = async (
     const activity = new ActivityLog(activityData);
     await activity.save();
 
+    // ✅ Reset failed attempts on success
+    if (failedLoggingAttempts > 0) {
+      failedLoggingAttempts = 0;
+    }
+
     console.log(`✅ Activity logged: ${mappedAction} by ${performedBy}`);
     return activity;
   } catch (error) {
     console.error("❌ Activity logging error:", error.message);
+    failedLoggingAttempts++;
 
-    // Don't throw error to prevent breaking main functionality
-    try {
-      await ActivityLog.create({
-        performedBy: performedBy || "system",
-        action: "logging_failed",
-        targetType: "system",
-        targetId: "system",
-        details: {
-          originalAction: action,
-          error: error.message,
-          targetType,
-          targetId,
-          timestamp: new Date(),
-        },
-        status: "failed",
-        severity: "high",
-        category: "system",
-        errorMessage: error.message,
-      });
-    } catch (fallbackError) {
-      console.error("❌ Even fallback logging failed:", fallbackError.message);
-    }
+    // ⚠️ DON'T create a "logging_failed" log - this causes recursion!
     return null;
   }
 };
@@ -226,6 +279,9 @@ const getActivityLogs = async (req, res) => {
     if (status) filter.status = status;
     if (severity) filter.severity = severity;
     if (category) filter.category = category;
+
+    // ✅ Exclude system/failed logs from UI
+    filter.action = { $ne: "logging_failed" };
 
     // Date range filter
     if (startDate || endDate) {
@@ -282,7 +338,7 @@ const getActivityLogs = async (req, res) => {
   }
 };
 
-// Enhanced getOfficerActivities with comprehensive statistics [web:64][web:65]
+// Enhanced getOfficerActivities with comprehensive statistics
 const getOfficerActivities = async (req, res) => {
   try {
     if (req.user?.policeRole !== "admin_police") {
@@ -318,6 +374,7 @@ const getOfficerActivities = async (req, res) => {
     const filter = {
       performedBy: new mongoose.Types.ObjectId(officerId),
       createdAt: { $gte: startDate },
+      action: { $ne: "logging_failed" }, // ✅ Exclude failed logs
     };
 
     if (action && action !== "all") filter.action = action;
@@ -326,7 +383,6 @@ const getOfficerActivities = async (req, res) => {
 
     const skip = (page - 1) * limit;
 
-    // Get activities with comprehensive statistics [web:64][web:65]
     const [activities, totalCount, recentCount, activityStats] =
       await Promise.all([
         ActivityLog.find(filter)
@@ -335,48 +391,35 @@ const getOfficerActivities = async (req, res) => {
           .limit(parseInt(limit))
           .lean(),
 
-        // Total count for this officer (all time)
+        // Total count for this officer (all time, excluding failed logs)
         ActivityLog.countDocuments({
           performedBy: new mongoose.Types.ObjectId(officerId),
+          action: { $ne: "logging_failed" },
         }),
 
         // Count for the filtered period
         ActivityLog.countDocuments(filter),
 
-        // Detailed statistics using aggregation [web:64][web:65]
+        // Detailed statistics using aggregation
         ActivityLog.aggregate([
           {
             $match: {
               performedBy: new mongoose.Types.ObjectId(officerId),
               createdAt: { $gte: startDate },
+              action: { $ne: "logging_failed" },
             },
           },
           {
             $group: {
               _id: null,
               totalActivities: { $sum: 1 },
-              categoryBreakdown: {
-                $push: "$category",
-              },
-              severityBreakdown: {
-                $push: "$severity",
-              },
-              actionBreakdown: {
-                $push: "$action",
-              },
-              dailyCount: {
-                $push: {
-                  date: {
-                    $dateToString: { format: "%Y-%m-%d", date: "$createdAt" },
-                  },
-                  count: 1,
-                },
-              },
+              categoryBreakdown: { $push: "$category" },
+              severityBreakdown: { $push: "$severity" },
+              actionBreakdown: { $push: "$action" },
             },
           },
           {
             $addFields: {
-              // Count by category
               authenticationCount: {
                 $size: {
                   $filter: {
@@ -393,7 +436,6 @@ const getOfficerActivities = async (req, res) => {
                   },
                 },
               },
-              // Count by severity
               lowSeverityCount: {
                 $size: {
                   $filter: {
@@ -426,17 +468,11 @@ const getOfficerActivities = async (req, res) => {
                   },
                 },
               },
-              // Alert activities
               alertActivitiesCount: {
                 $size: {
                   $filter: {
                     input: "$actionBreakdown",
-                    cond: {
-                      $regexMatch: {
-                        input: "$$this",
-                        regex: "alert",
-                      },
-                    },
+                    cond: { $regexMatch: { input: "$$this", regex: "alert" } },
                   },
                 },
               },
@@ -469,11 +505,10 @@ const getOfficerActivities = async (req, res) => {
           rank: officer.rank,
         },
         activities,
-        totalCount, // Total activities for this officer (all time)
-        recentCount, // Activities in the filtered period
+        totalCount,
+        recentCount,
         statistics: {
           ...stats,
-          // Additional calculated metrics
           averageActivitiesPerDay:
             Math.round((recentCount / parseInt(days)) * 10) / 10,
           activityTrend:
@@ -510,6 +545,11 @@ const getActivityStats = async (req, res) => {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - parseInt(days));
 
+    const baseFilter = {
+      createdAt: { $gte: startDate },
+      action: { $ne: "logging_failed" }, // ✅ Exclude failed logs
+    };
+
     const [
       totalActivities,
       activitiesByAction,
@@ -519,22 +559,17 @@ const getActivityStats = async (req, res) => {
       recentActivities,
       dailyActivities,
     ] = await Promise.all([
-      // Total activities count
-      ActivityLog.countDocuments({
-        createdAt: { $gte: startDate },
-      }),
+      ActivityLog.countDocuments(baseFilter),
 
-      // Activities grouped by action
       ActivityLog.aggregate([
-        { $match: { createdAt: { $gte: startDate } } },
+        { $match: baseFilter },
         { $group: { _id: "$action", count: { $sum: 1 } } },
         { $sort: { count: -1 } },
         { $limit: 10 },
       ]),
 
-      // Activities grouped by officer [web:64][web:65]
       ActivityLog.aggregate([
-        { $match: { createdAt: { $gte: startDate } } },
+        { $match: baseFilter },
         { $group: { _id: "$performedBy", count: { $sum: 1 } } },
         {
           $lookup: {
@@ -558,30 +593,26 @@ const getActivityStats = async (req, res) => {
         { $limit: 10 },
       ]),
 
-      // Activities grouped by category
       ActivityLog.aggregate([
-        { $match: { createdAt: { $gte: startDate } } },
+        { $match: baseFilter },
         { $group: { _id: "$category", count: { $sum: 1 } } },
         { $sort: { count: -1 } },
       ]),
 
-      // Activities grouped by severity
       ActivityLog.aggregate([
-        { $match: { createdAt: { $gte: startDate } } },
+        { $match: baseFilter },
         { $group: { _id: "$severity", count: { $sum: 1 } } },
         { $sort: { count: -1 } },
       ]),
 
-      // Recent activities (last 10)
-      ActivityLog.find({ createdAt: { $gte: startDate } })
+      ActivityLog.find(baseFilter)
         .populate("performedBy", "name badgeNumber")
         .sort({ createdAt: -1 })
         .limit(10)
         .lean(),
 
-      // Daily activity count [web:67]
       ActivityLog.aggregate([
-        { $match: { createdAt: { $gte: startDate } } },
+        { $match: baseFilter },
         {
           $group: {
             _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
@@ -628,6 +659,7 @@ const getMyActivities = async (req, res) => {
     const filter = {
       performedBy: new mongoose.Types.ObjectId(req.user.policeId),
       createdAt: { $gte: startDate },
+      action: { $ne: "logging_failed" }, // ✅ Exclude failed logs
     };
 
     if (category) filter.category = category;
@@ -643,20 +675,17 @@ const getMyActivities = async (req, res) => {
         .lean(),
       ActivityLog.countDocuments({
         performedBy: new mongoose.Types.ObjectId(req.user.policeId),
-      }), // Total count all time
+        action: { $ne: "logging_failed" },
+      }),
       ActivityLog.aggregate([
         {
           $match: {
             performedBy: new mongoose.Types.ObjectId(req.user.policeId),
             createdAt: { $gte: startDate },
+            action: { $ne: "logging_failed" },
           },
         },
-        {
-          $group: {
-            _id: "$category",
-            count: { $sum: 1 },
-          },
-        },
+        { $group: { _id: "$category", count: { $sum: 1 } } },
       ]),
     ]);
 
@@ -664,8 +693,8 @@ const getMyActivities = async (req, res) => {
       success: true,
       data: {
         activities,
-        totalCount, // All-time count
-        recentCount: activities.length, // Count in the filtered period
+        totalCount,
+        recentCount: activities.length,
         myStats,
         dateRange: {
           from: startDate,

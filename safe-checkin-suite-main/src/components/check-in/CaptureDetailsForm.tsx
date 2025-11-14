@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from "react";
+// components/check-in/CaptureDetailsForm.tsx - Updated with photo support
+import React, { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,7 +17,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Camera, UserPlus, Trash2, Crown } from "lucide-react";
+import { Camera, UserPlus, Trash2, Crown, CheckCircle } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -31,14 +32,13 @@ import { Checkbox } from "@/components/ui/checkbox";
 
 import { validateUniqueness } from "@/api/guestApi";
 
-const CaptureDetailsForm = ({
-  onBack,
-  onComplete,
-  totalGuests,
-  onCaptureChange,
-  capturedGuestsData,
-  primaryGuestName,
-}: {
+interface PhotoFiles {
+  guestPhoto: File | null;
+  idFront: File | null;
+  idBack: File | null;
+}
+
+interface CaptureDetailsFormProps {
   onBack: () => void;
   onComplete: () => void;
   totalGuests: number;
@@ -59,10 +59,28 @@ const CaptureDetailsForm = ({
     email?: string;
   }[];
   primaryGuestName?: string;
+  onPhotoChange: (photoType: keyof PhotoFiles, file: File | null) => void;
+  photoFiles: PhotoFiles;
+}
+
+const CaptureDetailsForm: React.FC<CaptureDetailsFormProps> = ({
+  onBack,
+  onComplete,
+  totalGuests,
+  onCaptureChange,
+  capturedGuestsData,
+  primaryGuestName,
+  onPhotoChange,
+  photoFiles,
 }) => {
   const [guests, setGuests] = useState(capturedGuestsData || []);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
+
+  // Refs for file inputs
+  const guestPhotoRef = useRef<HTMLInputElement>(null);
+  const idFrontRef = useRef<HTMLInputElement>(null);
+  const idBackRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     onCaptureChange(guests);
@@ -77,6 +95,54 @@ const CaptureDetailsForm = ({
   });
   const [guestError, setGuestError] = useState("");
 
+  // Photo validation and handling
+  const validatePhotoFile = (file: File): string | null => {
+    const maxSize = 5 * 1024 * 1024; // 5MB
+    const allowedTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+
+    if (file.size > maxSize) {
+      return "File size must be less than 5MB";
+    }
+
+    if (!allowedTypes.includes(file.type)) {
+      return "Only JPEG, PNG, and WebP images are allowed";
+    }
+
+    return null;
+  };
+
+  const handleFileChange = (
+    event: React.ChangeEvent<HTMLInputElement>,
+    photoType: keyof PhotoFiles
+  ) => {
+    const file = event.target.files?.[0] || null;
+
+    if (file) {
+      const validationError = validatePhotoFile(file);
+      if (validationError) {
+        alert(validationError);
+        return;
+      }
+    }
+
+    onPhotoChange(photoType, file);
+  };
+
+  const triggerFileInput = (photoType: keyof PhotoFiles) => {
+    switch (photoType) {
+      case "guestPhoto":
+        guestPhotoRef.current?.click();
+        break;
+      case "idFront":
+        idFrontRef.current?.click();
+        break;
+      case "idBack":
+        idBackRef.current?.click();
+        break;
+    }
+  };
+
+  // Existing validation functions
   const validateEmail = (email: string) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return emailRegex.test(email);
@@ -100,11 +166,11 @@ const CaptureDetailsForm = ({
       case "Driver License":
         return validateDL(number);
       default:
-        return number.length > 0; // Basic validation for other types
+        return number.length > 0;
     }
   };
 
-  // Function to check if ID number already exists in database
+  // Existing validation functions for uniqueness
   const checkIdUniqueness = async (idNumber: string) => {
     try {
       const result = await validateUniqueness({ idNumber });
@@ -115,7 +181,6 @@ const CaptureDetailsForm = ({
     }
   };
 
-  // Function to check if phone already exists in database
   const checkPhoneUniqueness = async (phone: string) => {
     try {
       const result = await validateUniqueness({ phone });
@@ -126,11 +191,8 @@ const CaptureDetailsForm = ({
     }
   };
 
-  // Note: Email uniqueness check is simplified since backend doesn't validate emails specifically
   const checkEmailUniqueness = async (email: string) => {
     try {
-      // For now, just check locally within the current guests array
-      // You can extend this to check against backend if needed
       return true;
     } catch (error) {
       console.error("Error checking email uniqueness:", error);
@@ -138,6 +200,7 @@ const CaptureDetailsForm = ({
     }
   };
 
+  // Existing guest management functions
   const handleAddGuest = async () => {
     const { name, idType, idNumber, isPrimary, email } = guestDialog;
 
@@ -166,13 +229,11 @@ const CaptureDetailsForm = ({
       return;
     }
 
-    // Check if trying to add another primary guest
     if (isPrimary && guests.some((guest) => guest.isPrimary)) {
       setGuestError("Only one primary guest is allowed.");
       return;
     }
 
-    // Check for local duplicates first
     const localIdExists = guests.some((guest) => guest.idNumber === idNumber);
     if (localIdExists) {
       setGuestError("This ID number is already added to the guest list.");
@@ -190,7 +251,6 @@ const CaptureDetailsForm = ({
     setIsValidating(true);
 
     try {
-      // Check ID uniqueness in database
       const isIdUnique = await checkIdUniqueness(idNumber);
       if (!isIdUnique) {
         setGuestError(
@@ -200,7 +260,6 @@ const CaptureDetailsForm = ({
         return;
       }
 
-      // Check email uniqueness in database (only for primary guests with email)
       if (isPrimary && email) {
         const isEmailUnique = await checkEmailUniqueness(email);
         if (!isEmailUnique) {
@@ -212,7 +271,6 @@ const CaptureDetailsForm = ({
         }
       }
 
-      // If this is marked as primary, update all other guests to not be primary
       const updatedGuests = isPrimary
         ? [
             ...guests.map((guest) => ({ ...guest, isPrimary: false })),
@@ -263,8 +321,35 @@ const CaptureDetailsForm = ({
 
   const hasPrimaryGuest = guests.some((guest) => guest.isPrimary);
 
+  // Check if all required photos are uploaded
+  const hasRequiredPhotos = photoFiles.guestPhoto !== null;
+  const canComplete = guests.length >= totalGuests && hasRequiredPhotos;
+
   return (
     <div className="space-y-6">
+      {/* Hidden file inputs */}
+      <input
+        ref={guestPhotoRef}
+        type="file"
+        accept="image/*"
+        onChange={(e) => handleFileChange(e, "guestPhoto")}
+        style={{ display: "none" }}
+      />
+      <input
+        ref={idFrontRef}
+        type="file"
+        accept="image/*"
+        onChange={(e) => handleFileChange(e, "idFront")}
+        style={{ display: "none" }}
+      />
+      <input
+        ref={idBackRef}
+        type="file"
+        accept="image/*"
+        onChange={(e) => handleFileChange(e, "idBack")}
+        style={{ display: "none" }}
+      />
+
       {/* Image Capture Section */}
       <Card>
         <CardHeader>
@@ -274,19 +359,75 @@ const CaptureDetailsForm = ({
           </CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Button variant="outline">
-            <Camera className="mr-2 h-4 w-4" /> Guest Photo
-          </Button>
-          <Button variant="outline">
-            <Camera className="mr-2 h-4 w-4" /> ID Front
-          </Button>
-          <Button variant="outline">
-            <Camera className="mr-2 h-4 w-4" /> ID Back
-          </Button>
+          {/* Guest Photo */}
+          <div className="flex flex-col items-center space-y-2">
+            <Button
+              variant="outline"
+              className="w-full h-24 flex flex-col items-center justify-center space-y-2"
+              onClick={() => triggerFileInput("guestPhoto")}
+              type="button"
+            >
+              {photoFiles.guestPhoto ? (
+                <CheckCircle className="h-6 w-6 text-green-500" />
+              ) : (
+                <Camera className="h-6 w-6" />
+              )}
+              <span>Guest Photo</span>
+            </Button>
+            {photoFiles.guestPhoto && (
+              <p className="text-xs text-green-600 text-center">
+                ✓ {photoFiles.guestPhoto.name}
+              </p>
+            )}
+          </div>
+
+          {/* ID Front */}
+          <div className="flex flex-col items-center space-y-2">
+            <Button
+              variant="outline"
+              className="w-full h-24 flex flex-col items-center justify-center space-y-2"
+              onClick={() => triggerFileInput("idFront")}
+              type="button"
+            >
+              {photoFiles.idFront ? (
+                <CheckCircle className="h-6 w-6 text-green-500" />
+              ) : (
+                <Camera className="h-6 w-6" />
+              )}
+              <span>ID Front</span>
+            </Button>
+            {photoFiles.idFront && (
+              <p className="text-xs text-green-600 text-center">
+                ✓ {photoFiles.idFront.name}
+              </p>
+            )}
+          </div>
+
+          {/* ID Back */}
+          <div className="flex flex-col items-center space-y-2">
+            <Button
+              variant="outline"
+              className="w-full h-24 flex flex-col items-center justify-center space-y-2"
+              onClick={() => triggerFileInput("idBack")}
+              type="button"
+            >
+              {photoFiles.idBack ? (
+                <CheckCircle className="h-6 w-6 text-green-500" />
+              ) : (
+                <Camera className="h-6 w-6" />
+              )}
+              <span>ID Back</span>
+            </Button>
+            {photoFiles.idBack && (
+              <p className="text-xs text-green-600 text-center">
+                ✓ {photoFiles.idBack.name}
+              </p>
+            )}
+          </div>
         </CardContent>
       </Card>
 
-      {/* Additional Guests */}
+      {/* Existing Guest Details Section */}
       <Card>
         <CardHeader className="flex justify-between">
           <div>
@@ -383,7 +524,6 @@ const CaptureDetailsForm = ({
                     )}
                 </div>
 
-                {/* Email field - only show if primary guest is selected */}
                 {guestDialog.isPrimary && (
                   <div className="space-y-2">
                     <Label>
@@ -416,7 +556,6 @@ const CaptureDetailsForm = ({
                   </div>
                 )}
 
-                {/* Primary Guest Checkbox */}
                 <div className="flex items-center space-x-2 p-3 bg-blue-50 rounded-lg border">
                   <Checkbox
                     id="isPrimary"
@@ -537,11 +676,18 @@ const CaptureDetailsForm = ({
             <p className="text-sm text-muted-foreground">
               {guests.length} of {totalGuests} guests added
             </p>
-            {!hasPrimaryGuest && guests.length > 0 && (
-              <p className="text-sm text-amber-600 font-medium">
-                ⚠️ Please select a primary guest
-              </p>
-            )}
+            <div className="flex flex-col items-end text-sm">
+              {!hasPrimaryGuest && guests.length > 0 && (
+                <p className="text-amber-600 font-medium">
+                  ⚠️ Please select a primary guest
+                </p>
+              )}
+              {!hasRequiredPhotos && (
+                <p className="text-red-600 font-medium">
+                  ⚠️ Guest photo is required
+                </p>
+              )}
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -551,7 +697,7 @@ const CaptureDetailsForm = ({
         <Button variant="outline" onClick={onBack}>
           Back
         </Button>
-        <Button onClick={onComplete} disabled={guests.length < totalGuests}>
+        <Button onClick={onComplete} disabled={!canComplete}>
           Complete Check-In
         </Button>
       </div>

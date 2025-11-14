@@ -1,4 +1,4 @@
-// src/api/guestApi.ts
+// src/api/guestApi.ts - Updated with proper FormData handling
 import axios from "axios";
 import { Guest } from "@/components/dashboard/GuestTable";
 
@@ -7,10 +7,7 @@ const API_BASE = "http://localhost:5000/api/guests";
 // Create axios instance with default config
 const api = axios.create({
   baseURL: API_BASE,
-  timeout: 10000,
-  headers: {
-    "Content-Type": "application/json",
-  },
+  timeout: 60000,
 });
 
 // Add request interceptor for authentication
@@ -20,6 +17,15 @@ api.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+
+    // Don't set Content-Type for FormData - let browser handle it
+    if (config.data instanceof FormData) {
+      delete config.headers["Content-Type"];
+      config.timeout = 120000;
+    } else {
+      config.headers["Content-Type"] = "application/json";
+    }
+
     return config;
   },
   (error) => {
@@ -35,11 +41,8 @@ api.interceptors.response.use(
 
     // Handle authentication errors
     if (error.response?.status === 401) {
-      // Clear stored auth data
       localStorage.removeItem("hotelToken");
       localStorage.removeItem("hotelData");
-
-      // Redirect to login page
       window.location.href = "/login";
     }
 
@@ -47,10 +50,53 @@ api.interceptors.response.use(
   }
 );
 
-// Guest API functions with updated response handling
+// UPDATED: Check-in function to handle FormData properly
+export const checkInGuest = async (formData: FormData | any) => {
+  try {
+    console.log("=== CheckIn API Call ===");
+
+    // Create custom config for file uploads
+    const config = {
+      timeout: formData instanceof FormData ? 120000 : 30000, // 2 min for files, 30s for regular
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
+    };
+
+    if (formData instanceof FormData) {
+      console.log("Sending FormData with files...");
+
+      // Log FormData contents for debugging
+      for (let [key, value] of formData.entries()) {
+        if (value instanceof File) {
+          console.log(`${key}: File - ${value.name} (${value.size} bytes)`);
+        } else {
+          console.log(`${key}: ${value}`);
+        }
+      }
+
+      const response = await api.post("/checkin", formData, config);
+      return response.data;
+    } else {
+      console.log("Sending JSON data...");
+      const response = await api.post("/checkin", formData, config);
+      return response.data;
+    }
+  } catch (error: any) {
+    console.error("=== CheckIn API Error ===");
+    console.error("Full error:", error);
+
+    if (error.code === "ECONNABORTED") {
+      console.error("Request timeout - file upload took too long");
+    }
+
+    throw error;
+  }
+};
+
+// Keep all other existing functions unchanged...
 export const fetchGuestById = async (id: string) => {
   const response = await api.get(`/${id}`);
-  return response.data.data; // Backend returns { success: true, data: guest }
+  return response.data.data;
 };
 
 export const fetchGuests = async (params?: {
@@ -72,111 +118,63 @@ export const fetchGuests = async (params?: {
 
   console.log("Full API response:", response.data);
 
-  // Handle different possible response structures
   let data, pagination;
 
   if (response.data.success) {
-    // If backend returns { success: true, guests: [...], pagination: {...} }
     data = response.data.guests;
     pagination = response.data.pagination;
   } else if (Array.isArray(response.data)) {
-    // If backend returns array directly
     data = response.data;
     pagination = {};
   } else if (response.data.guests) {
-    // If backend returns { guests: [...], pagination: {...} }
     data = response.data.guests;
     pagination = response.data.pagination;
   } else {
-    // Fallback - assume the response.data is the array
     data = response.data;
     pagination = {};
   }
 
-  console.log("Extracted data:", data);
-  console.log("Data type:", typeof data, "Is array:", Array.isArray(data));
-
-  // Ensure data is an array
   if (!Array.isArray(data)) {
     console.warn("Data is not an array, converting to empty array");
     data = [];
   }
 
-  // Transform MongoDB data to Guest interface
-  const transformedData = data.map((guest: any) => {
-    console.log("Processing guest:", guest);
+  const transformedData = data.map((guest: any) => ({
+    id: guest._id,
+    _id: guest._id,
+    name: guest.name || guest.guests?.[0]?.name || "Unknown Guest",
+    phone: guest.phone,
+    email: guest.email || "No email provided",
+    nationality:
+      guest.nationality?.charAt(0).toUpperCase() + guest.nationality?.slice(1),
+    roomNumber: guest.roomNumber,
+    checkInDate: new Date(guest.checkInTime).toISOString().split("T")[0],
+    checkInTime: guest.checkInTime,
+    checkOutDate: guest.checkOutDate
+      ? new Date(guest.checkOutDate).toISOString().split("T")[0]
+      : undefined,
+    status: guest.status || "checked-in",
+    purposeOfVisit:
+      guest.purpose?.charAt(0).toUpperCase() + guest.purpose?.slice(1),
+    purpose: guest.purpose,
+    referenceNumber: guest.referenceNumber,
+    totalGuests: guest.guestCount,
+    guestCount: guest.guestCount,
+    maleGuests: guest.maleGuests,
+    femaleGuests: guest.femaleGuests,
+    childGuests: guest.childGuests,
+    bookingMode: guest.bookingMode,
+    bookingWebsite: guest.bookingWebsite,
+    totalAmount: guest.totalAmount,
+    advanceAmount: guest.advanceAmount,
+    balanceAmount: guest.balanceAmount,
+    notes: guest.notes,
+    photos: guest.photos, // Add photos support
+  }));
 
-    return {
-      id: guest._id,
-      _id: guest._id,
-      name: guest.name || guest.guests?.[0]?.name || "Unknown Guest",
-      phone: guest.phone,
-      email: guest.email || "No email provided",
-      nationality:
-        guest.nationality?.charAt(0).toUpperCase() +
-        guest.nationality?.slice(1),
-      roomNumber: guest.roomNumber,
-      checkInDate: new Date(guest.checkInTime).toISOString().split("T")[0],
-      checkInTime: guest.checkInTime,
-      checkOutDate: guest.checkOutDate
-        ? new Date(guest.checkOutDate).toISOString().split("T")[0]
-        : undefined,
-      status: guest.status || "checked-in",
-      purposeOfVisit:
-        guest.purpose?.charAt(0).toUpperCase() + guest.purpose?.slice(1),
-      purpose: guest.purpose,
-      referenceNumber: guest.referenceNumber,
-      totalGuests: guest.guestCount,
-      guestCount: guest.guestCount,
-      maleGuests: guest.maleGuests,
-      femaleGuests: guest.femaleGuests,
-      childGuests: guest.childGuests,
-      bookingMode: guest.bookingMode,
-      bookingWebsite: guest.bookingWebsite,
-      totalAmount: guest.totalAmount,
-      advanceAmount: guest.advanceAmount,
-      balanceAmount: guest.balanceAmount,
-      notes: guest.notes,
-    };
-  });
-
-  console.log("Transformed data:", transformedData);
   return { guests: transformedData, pagination: pagination || {} };
 };
-export const checkInGuest = async (guestData: any) => {
-  const response = await api.post("/checkin", guestData);
-  return response.data; // Backend returns { success: true, message: "...", data: guest }
-};
 
-export const checkOutGuest = async (
-  guestId: string,
-  checkoutData?: {
-    checkOutDate?: string;
-    finalAmount?: number;
-    notes?: string;
-  }
-) => {
-  try {
-    const response = await api.put(`/${guestId}/checkout`, checkoutData || {});
-    return response.data;
-  } catch (error) {
-    throw new Error("Failed to check out guest");
-  }
-};
-
-export const updateGuest = async (
-  guestId: string,
-  guestData: Partial<Guest>
-) => {
-  try {
-    const response = await api.put(`/${guestId}`, guestData);
-    return response.data;
-  } catch (error) {
-    throw new Error("Failed to update guest");
-  }
-};
-
-// Updated validation functions to work with new backend API
 export const validateUniqueness = async (params: {
   phone?: string;
   idNumber?: string;
@@ -189,7 +187,7 @@ export const validateUniqueness = async (params: {
     if (params.excludeId) queryParams.append("excludeId", params.excludeId);
 
     const response = await api.get(`/validate?${queryParams.toString()}`);
-    return response.data; // Backend returns { success: true, isUnique: boolean, conflictType: string, existingGuest: object }
+    return response.data;
   } catch (error) {
     console.error("Error validating uniqueness:", error);
     throw error;
@@ -221,57 +219,39 @@ export const getAllGuestsByRoom = async (status = "checked-in") => {
   }
 };
 
-// Legacy function for backward compatibility
+export const checkOutGuest = async (
+  guestId: string,
+  checkoutData?: {
+    checkOutDate?: string;
+    finalAmount?: number;
+    notes?: string;
+  }
+) => {
+  try {
+    const response = await api.put(`/${guestId}/checkout`, checkoutData || {});
+    return response.data;
+  } catch (error) {
+    throw new Error("Failed to check out guest");
+  }
+};
+
+export const updateGuest = async (
+  guestId: string,
+  guestData: Partial<Guest>
+) => {
+  try {
+    const response = await api.put(`/${guestId}`, guestData);
+    return response.data;
+  } catch (error) {
+    throw new Error("Failed to update guest");
+  }
+};
+
 export const deleteGuest = async (guestId: string) => {
   try {
-    // Note: Delete functionality might not be implemented in backend
-    // Consider using status update instead
     const response = await api.delete(`/${guestId}`);
     return response.data;
   } catch (error) {
     throw new Error("Failed to delete guest");
-  }
-};
-export const checkInGuestUpdated = async (guestData: any) => {
-  try {
-    console.log("Sending guest data:", JSON.stringify(guestData, null, 2));
-
-    // Validate required fields before sending
-    const requiredFields = [
-      "name",
-      "phone",
-      "nationality",
-      "purpose",
-      "guestCount",
-      "bookingMode",
-      "roomNumber",
-      "guests",
-    ];
-    for (const field of requiredFields) {
-      if (!guestData[field]) {
-        throw new Error(`Missing required field: ${field}`);
-      }
-    }
-
-    const response = await api.post("/checkin", guestData);
-    console.log("Check-in response:", response.data);
-    return response.data;
-  } catch (error: any) {
-    console.error("Full error object:", error);
-
-    if (error.response) {
-      // Server responded with error status
-      console.error("Response status:", error.response.status);
-      console.error("Response data:", error.response.data);
-      console.error("Response headers:", error.response.headers);
-    } else if (error.request) {
-      // Request was made but no response received
-      console.error("No response received:", error.request);
-    } else {
-      // Something else happened
-      console.error("Error message:", error.message);
-    }
-
-    throw error;
   }
 };

@@ -4,6 +4,7 @@ const Police = require("../models/Police");
 const { logActivity } = require("../controllers/activityController");
 
 // Enhanced police authentication with activity tracking
+// middleware/policeAuth.js - FIXED VERSION
 const authenticatePolice = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
@@ -26,13 +27,11 @@ const authenticatePolice = async (req, res, next) => {
       });
     }
 
-    const JWT_SECRET =
-      process.env.JWT_SECRET || "default-secret-change-in-production";
+    const JWT_SECRET = process.env.JWT_SECRET || "default-secret-change-in-production";
 
     try {
       const decoded = jwt.verify(token, JWT_SECRET);
 
-      // Check if user has police role
       if (!decoded.role || decoded.role !== "police") {
         return res.status(403).json({
           success: false,
@@ -41,7 +40,6 @@ const authenticatePolice = async (req, res, next) => {
         });
       }
 
-      // Verify police officer still exists and is active
       const police = await Police.findById(decoded.policeId);
 
       if (!police) {
@@ -60,10 +58,16 @@ const authenticatePolice = async (req, res, next) => {
         });
       }
 
-      // Update police officer's activity
-      await police.updateActivity();
+      // FIXED: Throttle activity updates
+      const now = new Date();
+      const lastActivity = police.lastActivityAt || new Date(0);
+      const timeDiff = now - lastActivity;
+      const FIVE_MINUTES = 5 * 60 * 1000;
 
-      // Add enhanced user info to request
+      if (timeDiff > FIVE_MINUTES) {
+        await police.updateActivity();
+      }
+
       req.user = {
         ...decoded,
         police: police,
@@ -105,6 +109,7 @@ const authenticatePolice = async (req, res, next) => {
     });
   }
 };
+
 
 // Enhanced role-based middleware
 const requireAdminPolice = (req, res, next) => {

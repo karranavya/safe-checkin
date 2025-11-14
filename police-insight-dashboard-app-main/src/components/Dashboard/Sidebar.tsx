@@ -137,11 +137,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ open, onOpenChange }) => {
           href: "/dashboard/admin/activities",
           icon: Activity,
         },
-        {
-          title: "System Analytics",
-          href: "/dashboard/admin/analytics",
-          icon: BarChart3,
-        },
+
         {
           title: "Admin Reports",
           href: "/dashboard/admin/reports",
