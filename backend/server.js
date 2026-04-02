@@ -104,14 +104,14 @@ app.use(
 
       res.setHeader(
         "Content-Type",
-        mimeTypes[ext] || "application/octet-stream"
+        mimeTypes[ext] || "application/octet-stream",
       );
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.setHeader("Cache-Control", "public, max-age=31536000");
     },
     index: false,
     redirect: false,
-  })
+  }),
 );
 
 /* ────────────────────────────  DEBUG ENDPOINTS  ───────────────────────────── */
@@ -253,19 +253,17 @@ app.use(securityHeaders);
 app.use(sanitizeInput);
 
 /* ─────────────────────────────  CORS & BASIC MIDDLEWARE  ───────────────────────────── */
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(",")
+  : [];
+
 app.use(
   cors({
-    origin: [
-      "http://localhost:3000",
-      "http://localhost:3001",
-      "http://localhost:8081",
-      "http://localhost:8082",
-      process.env.FRONTEND_URL,
-    ].filter(Boolean),
+    origin: allowedOrigins,
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allowedHeaders: ["Content-Type", "Authorization"],
-  })
+  }),
 );
 
 // Simple request logging
@@ -407,7 +405,7 @@ app.use((error, req, res, next) => {
   // Validation error
   if (error.name === "ValidationError") {
     const messages = Object.values(error.errors || {}).map(
-      (err) => err.message
+      (err) => err.message,
     );
     return res.status(400).json({
       success: false,
@@ -456,7 +454,7 @@ server.listen(PORT, () => {
   console.log(`📂 Upload directory: ${uploadsPath}`);
   console.log(`📁 Evidence directory: ${evidencePath}`);
   console.log(
-    `🔗 MongoDB: ${MONGODB_URI.includes("localhost") ? "Local" : "Remote"}`
+    `🔗 MongoDB: ${MONGODB_URI.includes("localhost") ? "Local" : "Remote"}`,
   );
 
   if (evidenceRoutes) {
