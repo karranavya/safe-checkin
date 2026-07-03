@@ -1,12 +1,13 @@
 """
-ReAct-style agent loop, with a defensive fallback for models that
-occasionally write a tool call as plain JSON text instead of using the
-structured tool_calls field (a known reliability quirk with some
-NVIDIA-hosted Llama models served via OpenAI-compatible APIs).
+ReAct-style agent loop.
 
-⭐ Also guarantees photo markdown appears in the final answer
-   deterministically, instead of relying on the model to correctly
-   follow the PHOTO DISPLAY RULES in the system prompt every time.
+Key fix: photo markdown is injected by Python AFTER the LLM generates its
+response, instead of asking the LLM to copy it. Small models reliably strip
+or transform markdown syntax like ![label](url), so we don't trust them with
+it. Instead:
+  1. During tool execution, collect photo markdown from search_guests results.
+  2. After the LLM produces its final text, append the photo markdown directly.
+  3. The frontend MessageContent component parses ![label](url) and renders <img>.
 """
 from openai import AsyncOpenAI
 import json
@@ -28,10 +29,8 @@ MAX_TOOL_ITERATIONS = 4
 
 
 def _enhance_prompt_with_context(system_prompt: str, messages: list[dict]) -> str:
-    """Inject last assistant response as context for follow-up questions."""
     if len(messages) <= 2:
         return system_prompt
-
     last_assistant = None
     for msg in reversed(messages):
         content = msg.get("content", "")
@@ -39,10 +38,8 @@ def _enhance_prompt_with_context(system_prompt: str, messages: list[dict]) -> st
             if "What would you like" not in content and "How can I" not in content:
                 last_assistant = content
                 break
-
     if not last_assistant:
         return system_prompt
-
     return (
         system_prompt
         + f"\n\nDATA FROM PREVIOUS RESPONSE (use to answer follow-ups without re-querying):\n"
@@ -50,109 +47,107 @@ def _enhance_prompt_with_context(system_prompt: str, messages: list[dict]) -> st
     )
 
 
-def _try_parse_inline_tool_call(content: str) -> tuple[str, dict] | None:
-    """
-    Defensive fallback: some models occasionally write the tool call as
-    plain JSON text in the response content instead of using the structured
-    tool_calls field. Detect that case so we still execute the tool correctly
-    instead of leaking raw JSON to the user.
-    """
-    if not content:
+def _balance_and_parse(text: str) -> dict | None:
+    """Brace-balanced JSON extraction — handles truncated model output."""
+    start = text.find('{')
+    if start == -1:
         return None
-    text = content.strip()
 
-    # Case 1: the entire content IS the JSON tool call (the common case)
-    try:
-        parsed = json.loads(text)
-        if isinstance(parsed, dict) and "name" in parsed:
-            params = parsed.get("parameters") or parsed.get("arguments") or {}
-            return parsed["name"], params
-    except (json.JSONDecodeError, TypeError):
-        pass
+    depth = 0
+    in_string = False
+    escape_next = False
+    end = -1
 
-    # Case 2: JSON tool call embedded inside other text
-    match = re.search(r'\{.*?"name"\s*:\s*"(\w+)".*\}', text, re.DOTALL)
-    if match:
+    for i, ch in enumerate(text[start:], start):
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == '\\' and in_string:
+            escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == '{':
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0:
+                end = i + 1
+                break
+
+    candidates = []
+    if end != -1:
+        candidates.append(text[start:end])
+    if depth > 0:
+        candidates.append(text[start:] + '}' * depth)
+
+    for candidate in candidates:
         try:
-            parsed = json.loads(match.group(0))
-            if isinstance(parsed, dict) and "name" in parsed:
-                params = parsed.get("parameters") or parsed.get("arguments") or {}
-                return parsed["name"], params
-        except json.JSONDecodeError:
-            pass
-
+            return json.loads(candidate)
+        except (json.JSONDecodeError, ValueError):
+            continue
     return None
 
 
-def _extract_records(data: object) -> list[dict]:
-    """
-    Normalise a single tool result's parsed JSON into a flat list of
-    record dicts. Tool results come back in different shapes:
-      - a plain list of records (search_guests, search_alerts)
-      - a dict with nested lists (text_search: {"guests": [...], "alerts": [...]})
-      - a single dict (get_stats, a single-match lookup)
-    """
-    if isinstance(data, list):
-        return [r for r in data if isinstance(r, dict)]
-
-    if isinstance(data, dict):
-        nested: list[dict] = []
-        found_nested = False
-        for value in data.values():
-            if isinstance(value, list):
-                nested.extend(r for r in value if isinstance(r, dict))
-                found_nested = True
-        return nested if found_nested else [data]
-
-    return []
-
-
-def _ensure_photo_markdown(final_text: str, tool_result_strs: list[str]) -> str:
-    """
-    Guarantee photo markdown appears in the final answer, regardless of
-    whether the model correctly followed the PHOTO DISPLAY RULES.
-
-    ⭐ Accumulates records across EVERY tool call made during this turn,
-    not just the most recent one — a multi-tool turn (e.g. search_hotels
-    then search_guests) would otherwise silently drop any guest/photo
-    data that arrived before the final tool call.
-
-    Appends markdown image tags for any photo URL not already present in
-    the model's answer, labelled with the guest's name (when available)
-    so multiple guests' photos aren't ambiguous once rendered.
-
-    This is deliberately dumb/deterministic — it does not try to parse
-    or rewrite what the model already wrote, it only fills gaps.
-    """
-    if not tool_result_strs:
-        return final_text
-
-    all_records: list[dict] = []
-    for tool_result_str in tool_result_strs:
-        if not tool_result_str:
+def _extract_params(raw_params: dict) -> dict:
+    """Flatten schema-bleed nested 'properties' key and drop empty strings."""
+    if not isinstance(raw_params, dict):
+        return {}
+    result = {}
+    for k, v in raw_params.items():
+        if k == "properties":
             continue
-        try:
-            data = json.loads(tool_result_str)
-        except (json.JSONDecodeError, TypeError):
+        if v != "" and v is not None:
+            result[k] = v
+    props = raw_params.get("properties", {})
+    if isinstance(props, dict):
+        for k, v in props.items():
+            if k not in result and v != "" and v is not None:
+                result[k] = v
+    return result
+
+
+def _try_parse_inline_tool_call(content: str) -> tuple[str, dict] | None:
+    """Detect a tool call written as plain text JSON instead of tool_calls."""
+    if not content or '{' not in content:
+        return None
+    parsed = _balance_and_parse(content.strip())
+    if not parsed or not isinstance(parsed, dict) or "name" not in parsed:
+        return None
+    raw_params = (
+        parsed.get("parameters")
+        or parsed.get("arguments")
+        or parsed.get("input")
+        or {}
+    )
+    return parsed["name"], _extract_params(raw_params)
+
+
+def _collect_photo_markdown(tool_name: str, tool_result: str) -> list[tuple[str, str]]:
+    """
+    Extract (guest_name, photo_markdown) pairs from a search_guests result.
+    Called after every tool execution — only search_guests produces photos.
+    """
+    if tool_name != "search_guests":
+        return []
+    try:
+        data = json.loads(tool_result)
+    except (json.JSONDecodeError, ValueError):
+        return []
+    if not isinstance(data, list):
+        return []
+
+    collected = []
+    for guest in data:
+        if not isinstance(guest, dict):
             continue
-        all_records.extend(_extract_records(data))
-
-    lines_to_add = []
-    for rec in all_records:
-        photos = rec.get("photo_urls")
-        if not photos or not isinstance(photos, dict):
-            continue
-        guest_name = rec.get("name")
-        for label, url in photos.items():
-            if not url or url in final_text:
-                continue
-            full_label = f"{guest_name} — {label}" if guest_name else label
-            lines_to_add.append(f"![{full_label}]({url})")
-
-    if not lines_to_add:
-        return final_text
-
-    return final_text.rstrip() + "\n\n" + "\n".join(lines_to_add)
+        photos = guest.get("photos", "")
+        if photos and "![" in photos:
+            collected.append((guest.get("name", "Guest"), photos))
+    return collected
 
 
 async def run_agent(
@@ -162,8 +157,8 @@ async def run_agent(
     hotel_id: str | None = None,
     is_police: bool = False,
     is_admin: bool = False,
-    police_id: str | None = None,    # ⭐ requesting officer's own ID
-    police_role: str | None = None,  # ⭐ "admin_police" or "sub_police"
+    police_id: str | None = None,
+    police_role: str | None = None,
 ) -> str:
     if not messages:
         raise ValueError("messages list cannot be empty")
@@ -178,7 +173,10 @@ async def run_agent(
         *trimmed,
     ]
 
-    all_tool_results: list[str] = []  # ⭐ track EVERY tool output this turn
+    # Collect photo markdown across all tool calls in this turn.
+    # Python will inject these after the LLM response — never trust the
+    # LLM to copy ![label](url) syntax correctly with smaller models.
+    all_photos: list[tuple[str, str]] = []
 
     for iteration in range(MAX_TOOL_ITERATIONS):
 
@@ -199,32 +197,35 @@ async def run_agent(
         if msg.tool_calls:
             tc = msg.tool_calls[0]
             tool_name = tc.function.name
-            tool_input = json.loads(tc.function.arguments)
+            try:
+                tool_input = json.loads(tc.function.arguments)
+            except json.JSONDecodeError:
+                tool_input = {}
             tool_call_id = tc.id
         else:
-            # ⭐ Defensive fallback — model wrote the call as plain text
             inline = _try_parse_inline_tool_call(msg.content or "")
             if inline:
                 tool_name, tool_input = inline
 
-        # No tool call detected either way — this is a genuine final answer
         if tool_name is None:
-            text = msg.content or "Please try rephrasing your question."
-            return _ensure_photo_markdown(text, all_tool_results)
+            # Final text response from LLM
+            reply = msg.content or "Please try rephrasing your question."
+            return _inject_photos(reply, all_photos)
 
         tool_result = await execute_tool(
             tool_name=tool_name,
-            tool_input=tool_input,
+            tool_input=tool_input or {},
             hotel_id=hotel_id,
             is_police=is_police,
             is_admin=is_admin,
             police_id=police_id,
             police_role=police_role,
         )
-        all_tool_results.append(tool_result)  # ⭐ remember every call this turn
+
+        # Collect photos immediately after execution
+        all_photos.extend(_collect_photo_markdown(tool_name, tool_result))
 
         if tool_call_id:
-            # Real structured tool call — use the proper tool-result format
             working_messages.append(msg)
             working_messages.append({
                 "role": "tool",
@@ -232,28 +233,49 @@ async def run_agent(
                 "content": tool_result,
             })
         else:
-            # Inline fallback — no tool_call_id exists to link to, so don't
-            # use the "tool" role (the API would reject it). Replace the
-            # leaked-JSON message with a clean placeholder instead, then
-            # inject the result as an instruction to answer in plain language.
             working_messages.append({"role": "assistant", "content": "Let me check that."})
             working_messages.append({
                 "role": "user",
                 "content": (
-                    f"[SYSTEM: The result of {tool_name} is: {tool_result}. "
-                    f"Answer the original question in plain natural language using "
-                    f"this data. Do NOT output JSON, function names, or parameters.]"
+                    f"[SYSTEM: Tool '{tool_name}' returned: {tool_result}. "
+                    f"Answer in plain natural language. Do NOT output JSON or markdown syntax.]"
                 ),
             })
 
-    # Exceeded max iterations — force a final text answer with whatever data was collected
+    # Max iterations — force final answer
     final = await _client.chat.completions.create(
         model=MODEL,
         max_tokens=MAX_TOKENS,
         messages=working_messages,
     )
-    text = final.choices[0].message.content or "Please try rephrasing your question."
-    return _ensure_photo_markdown(text, all_tool_results)  # ⭐ applied here too
+    reply = final.choices[0].message.content or "Please try rephrasing your question."
+    return _inject_photos(reply, all_photos)
+
+
+def _inject_photos(reply: str, photos: list[tuple[str, str]]) -> str:
+    """
+    Append photo markdown to the reply if:
+    - Photos were collected from tool results, AND
+    - The LLM didn't already include them (checked by presence of '![')
+
+    For a single guest: append photos after the text.
+    For multiple guests: label each block with the guest name.
+    """
+    if not photos:
+        return reply
+
+    # If the LLM somehow did include valid photo markdown, don't duplicate
+    if "![" in reply:
+        return reply
+
+    if len(photos) == 1:
+        _, markdown = photos[0]
+        return reply.rstrip() + "\n\n" + markdown
+    else:
+        blocks = []
+        for name, markdown in photos:
+            blocks.append(f"**{name}**\n{markdown}")
+        return reply.rstrip() + "\n\n" + "\n\n".join(blocks)
 
 
 def _convert_tools(anthropic_tools: list[dict]) -> list[dict]:

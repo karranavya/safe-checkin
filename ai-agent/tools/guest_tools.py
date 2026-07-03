@@ -1,7 +1,7 @@
 """
-search_guests — jurisdiction-scoped for police callers, with the same
-explicit-hotel-name loophole fix as search_alerts. Hotel-side calls
-(hotel_id provided, is_police=False) are unaffected.
+search_guests — photo URLs are now pre-formatted as markdown image syntax
+inside the tool result itself, so the LLM just copies them through rather
+than having to construct the format from scratch (which it does unreliably).
 """
 import re
 from db.mongo import guests, hotels
@@ -12,31 +12,37 @@ from config.settings import get_settings
 settings = get_settings()
 
 
-def _build_photo_urls(doc: dict) -> dict | None:
+def _build_photo_markdown(doc: dict) -> str | None:
+    """
+    Returns ready-to-render markdown image lines, e.g.:
+      ![Guest Photo](http://localhost:5000/api/guests/abc123/photo/guestPhoto)
+      ![ID Front](http://localhost:5000/api/guests/abc123/photo/idFront)
+
+    Pre-formatting here is more reliable than instructing the LLM to construct
+    the syntax itself — smaller models often drop the URL or forget the ![] part.
+    """
     photos = doc.get("photos", {})
     if not photos:
         return None
 
-    urls = {}
-    labels = {
-        "guestPhoto": "Guest Photo",
-        "idFront":    "ID Front",
-        "idBack":     "ID Back",
-    }
+    guest_id = str(doc.get("_id", ""))
+    if not guest_id:
+        return None
 
-    for field, label in labels.items():
-        info = photos.get(field, {})
-        if not info:
-            continue
-        raw_path = info.get("path") or info.get("filename") or ""
-        if not raw_path:
-            continue
-        raw_path = raw_path.replace("\\", "/")
-        if not raw_path.startswith("uploads"):
-            raw_path = f"uploads/{raw_path}"
-        urls[label] = f"{settings.backend_url}/{raw_path}"
+    lines = []
+    for field, label in [
+        ("guestPhoto", "Guest Photo"),
+        ("idFront",    "ID Front"),
+        ("idBack",     "ID Back"),
+    ]:
+        photo_info = photos.get(field) or {}
+        has_data = bool(photo_info.get("data"))
+        has_path = bool(photo_info.get("path") or photo_info.get("filename"))
+        if has_data or has_path:
+            url = f"{settings.backend_url}/api/guests/photo/{guest_id}/{field}"
+            lines.append(f"![{label}]({url})")
 
-    return urls if urls else None
+    return "\n".join(lines) if lines else None
 
 
 async def search_guests(
@@ -61,7 +67,6 @@ async def search_guests(
             if not hotel_doc:
                 return f"No hotel found matching '{params['hotel_name']}'."
 
-            # ⭐ Jurisdiction check even for an explicit named lookup
             if police_id:
                 jurisdiction_ids = await get_jurisdiction_hotel_ids(police_id, police_role)
                 if jurisdiction_ids is None:
@@ -72,7 +77,6 @@ async def search_guests(
             query["hotelId"] = hotel_doc["_id"]
 
         elif police_id:
-            # ⭐ No specific hotel named — default-scope to jurisdiction
             jurisdiction_ids = await get_jurisdiction_hotel_ids(police_id, police_role)
             if jurisdiction_ids is None:
                 return "Your jurisdiction has not been configured yet — no guests to show."
@@ -109,10 +113,9 @@ async def search_guests(
     async for doc in cursor:
         aadhaar_display = "N/A"
         for g in doc.get("guests", []):
-            if g.get("isPrimary") or True:
-                if g.get("idNumber"):
-                    aadhaar_display = mask_aadhaar(g["idNumber"])
-                break
+            if g.get("idNumber"):
+                aadhaar_display = mask_aadhaar(g["idNumber"])
+            break
 
         row = {
             "name":         doc.get("name", "Unknown"),
@@ -129,9 +132,11 @@ async def search_guests(
             "aadhaar":      aadhaar_display,
         }
 
-        photo_urls = _build_photo_urls(doc)
-        if photo_urls:
-            row["photo_urls"] = photo_urls
+        # ⭐ Pre-formatted markdown — LLM copies this verbatim rather than
+        # constructing it, which is far more reliable with smaller models.
+        photos_markdown = _build_photo_markdown(doc)
+        if photos_markdown:
+            row["photos"] = photos_markdown
 
         if is_police and doc.get("hotelId"):
             hotel_doc = await hotels().find_one(
@@ -141,4 +146,4 @@ async def search_guests(
 
         results.append(row)
 
-    return results if results else "No guests found in your jurisdiction matching those criteria."
+    return results if results else "No guests found matching those criteria."
