@@ -1,4 +1,4 @@
-// src/components/Dashboard/HotelList.tsx - UPDATED with Phone Number Update Feature
+// src/components/Dashboard/HotelList.tsx - ADDED: Table/Map view toggle with jurisdiction map
 import React, { useState, useEffect } from "react";
 import {
   Building,
@@ -22,7 +22,11 @@ import {
   Edit,
   Save,
   RefreshCw,
+  Map,
+  List,
 } from "lucide-react";
+import { useJurisdictionData } from "@/hooks/useJurisdictionData";
+import { JurisdictionMap } from "./JurisdictionMap";
 
 // Updated interface to match new schema with verification status
 interface Hotel {
@@ -123,7 +127,7 @@ const HotelDetailsModal: React.FC<{
   const [isEditingStatus, setIsEditingStatus] = useState(false);
   const [isEditingOwner, setIsEditingOwner] = useState(false);
   const [selectedStatus, setSelectedStatus] = useState(
-    hotel.verificationStatus
+    hotel.verificationStatus,
   );
   const [statusNotes, setStatusNotes] = useState(hotel.verificationNotes || "");
   const [ownerName, setOwnerName] = useState(hotel.ownerName);
@@ -185,7 +189,7 @@ const HotelDetailsModal: React.FC<{
       setIsEditingStatus(false);
     } catch (error) {
       setUpdateError(
-        error instanceof Error ? error.message : "Failed to update status"
+        error instanceof Error ? error.message : "Failed to update status",
       );
     } finally {
       setIsUpdating(false);
@@ -222,7 +226,7 @@ const HotelDetailsModal: React.FC<{
       setUpdateError(
         error instanceof Error
           ? error.message
-          : "Failed to update owner information"
+          : "Failed to update owner information",
       );
     } finally {
       setIsUpdating(false);
@@ -244,7 +248,7 @@ const HotelDetailsModal: React.FC<{
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[9999]">
       <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
         {/* Modal Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
@@ -608,7 +612,7 @@ const HotelDetailsModal: React.FC<{
                                 option.value as
                                   | "verified"
                                   | "pending"
-                                  | "unverified"
+                                  | "unverified",
                               )
                             }
                           >
@@ -623,7 +627,7 @@ const HotelDetailsModal: React.FC<{
                                     option.value as
                                       | "verified"
                                       | "pending"
-                                      | "unverified"
+                                      | "unverified",
                                   )
                                 }
                                 className="mt-1 mr-3"
@@ -774,6 +778,56 @@ const HotelList: React.FC = () => {
     registeredByPolice: "true",
   });
 
+  // ✅ NEW — table/map view toggle + jurisdiction map data
+  const [viewMode, setViewMode] = useState<"table" | "map">("table");
+  const { data: jurisdictionData, loading: jurisdictionLoading } = useJurisdictionData();
+
+  // ✅ NEW — fetches the full hotel record by ID and opens the same modal
+  // used by the table's Eye button. Needed because the jurisdiction map
+  // endpoint only returns summary fields, not the full hotel document.
+  const handleViewHotelById = async (hotelId: string) => {
+    try {
+      const token =
+        sessionStorage.getItem("policeToken") ||
+        localStorage.getItem("policeToken");
+
+      // 🔍 TEMPORARY DEBUG — remove once the 401 is resolved
+      console.log("[Eye button] hotelId:", hotelId);
+      console.log("[Eye button] token present:", !!token);
+      console.log("[Eye button] token preview:", token ? token.slice(0, 20) + "..." : "NULL/MISSING");
+
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL || "http://localhost:5000"}/api/hotels/${hotelId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        },
+      );
+
+      // 🔍 TEMPORARY DEBUG
+      console.log("[Eye button] response status:", response.status);
+
+      if (!response.ok) {
+        const errBody = await response.json().catch(() => ({}));
+        console.log("[Eye button] error body:", errBody);
+        throw new Error(errBody.error || `Request failed (${response.status})`);
+      }
+
+      const data = await response.json();
+
+      if (data.success && data.data?.hotel) {
+        setSelectedHotel(data.data.hotel);
+        setShowModal(true);
+      } else {
+        setError("Could not load hotel details");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load hotel details");
+    }
+  };
+
   // UPDATED: Handle both status and owner info updates
   const handleHotelUpdate = async (hotelId: string, updates: any) => {
     try {
@@ -789,13 +843,13 @@ const HotelList: React.FC = () => {
       let payload = {};
 
       if (updates.type === "status") {
-        endpoint = `http://localhost:5000/api/hotels/${hotelId}/verification-status`;
+        endpoint = `${import.meta.env.VITE_API_URL || "http://localhost:5000"}/api/hotels/${hotelId}/verification-status`;
         payload = {
           verificationStatus: updates.verificationStatus,
           verificationNotes: updates.verificationNotes,
         };
       } else if (updates.type === "owner") {
-        endpoint = `http://localhost:5000/api/hotels/${hotelId}/owner-info`;
+        endpoint = `${import.meta.env.VITE_API_URL || "http://localhost:5000"}/api/hotels/${hotelId}/owner-info`;
         payload = {
           ownerName: updates.ownerName,
           ownerPhone: updates.ownerPhone,
@@ -836,8 +890,8 @@ const HotelList: React.FC = () => {
                   ownerPhone: updates.ownerPhone,
                 }),
               }
-            : hotel
-        )
+            : hotel,
+        ),
       );
 
       // Update selected hotel if it's the one being updated
@@ -860,15 +914,13 @@ const HotelList: React.FC = () => {
                   ownerPhone: updates.ownerPhone,
                 }),
               }
-            : null
+            : null,
         );
       }
     } catch (error) {
       throw error;
     }
   };
-
-  // ... (keep all existing functions the same: fetchHotels, handleSearch, etc.)
 
   // Fetch hotels
   const fetchHotels = async (page = 1, search = "", filterParams = filters) => {
@@ -897,13 +949,13 @@ const HotelList: React.FC = () => {
       });
 
       const response = await fetch(
-        `http://localhost:5000/api/hotels/all?${queryParams}`,
+        `${import.meta.env.VITE_API_URL || "http://localhost:5000"}/api/hotels/all?${queryParams}`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
-        }
+        },
       );
 
       if (response.status === 401) {
@@ -1013,265 +1065,337 @@ const HotelList: React.FC = () => {
               View and manage registered accommodation facilities
             </p>
           </div>
-          <button
-            onClick={handleRefresh}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            Refresh
-          </button>
-        </div>
-
-        {/* Search and Filters */}
-        <div className="bg-white rounded-lg shadow border p-4 mb-6">
-          <div className="flex flex-col md:flex-row gap-4">
-            {/* Search */}
-            <form onSubmit={handleSearch} className="flex-1">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                <input
-                  type="text"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Search hotels by name, email, or owner..."
-                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-            </form>
-
-            {/* Filter Buttons */}
-            <div className="flex gap-2">
+          <div className="flex items-center gap-3">
+            {/* ✅ NEW — Table / Map view toggle */}
+            <div className="flex bg-gray-100 rounded-lg p-1">
               <button
-                onClick={handleSearch}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                onClick={() => setViewMode("table")}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                  viewMode === "table"
+                    ? "bg-white shadow text-blue-600"
+                    : "text-gray-600 hover:text-gray-900"
+                }`}
               >
-                Search
+                <List className="w-4 h-4" />
+                Table
+              </button>
+              <button
+                onClick={() => setViewMode("map")}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                  viewMode === "map"
+                    ? "bg-white shadow text-blue-600"
+                    : "text-gray-600 hover:text-gray-900"
+                }`}
+              >
+                <Map className="w-4 h-4" />
+                Map
               </button>
             </div>
+            <button
+              onClick={handleRefresh}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Refresh
+            </button>
           </div>
         </div>
 
-        {/* Error Message */}
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">
-            <div className="flex justify-between items-center">
-              <span>{error}</span>
-              <button
-                onClick={() => setError("")}
-                className="text-red-500 hover:text-red-700"
-              >
-                ×
-              </button>
+        {/* ════════════════════ MAP VIEW ════════════════════ */}
+        {viewMode === "map" && (
+          <div className="space-y-4">
+            {/* Quick stats strip */}
+            {jurisdictionData?.configured && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="bg-white rounded-lg shadow border p-4">
+                  <p className="text-xs text-gray-500 font-medium">TOTAL HOTELS</p>
+                  <p className="text-2xl font-bold text-gray-900">{jurisdictionData.counts.total}</p>
+                </div>
+                <div className="bg-white rounded-lg shadow border p-4">
+                  <p className="text-xs text-gray-500 font-medium">VERIFIED</p>
+                  <p className="text-2xl font-bold text-green-600">{jurisdictionData.counts.verified}</p>
+                </div>
+                <div className="bg-white rounded-lg shadow border p-4">
+                  <p className="text-xs text-gray-500 font-medium">PENDING</p>
+                  <p className="text-2xl font-bold text-yellow-600">{jurisdictionData.counts.pending}</p>
+                </div>
+                <div className="bg-white rounded-lg shadow border p-4">
+                  <p className="text-xs text-gray-500 font-medium">UNVERIFIED</p>
+                  <p className="text-2xl font-bold text-red-600">{jurisdictionData.counts.unverified}</p>
+                </div>
+              </div>
+            )}
+
+            <div className="bg-white rounded-lg shadow border p-4">
+              {jurisdictionLoading ? (
+                <div className="h-[500px] flex items-center justify-center">
+                  <RefreshCw className="h-8 w-8 animate-spin text-blue-400" />
+                </div>
+              ) : (
+                <JurisdictionMap data={jurisdictionData} heightClass="h-[500px]" onViewDetails={handleViewHotelById} />
+              )}
+              <p className="text-xs text-gray-400 mt-3 text-center">
+                🟢 Verified &nbsp;·&nbsp; 🟡 Pending &nbsp;·&nbsp; 🔴 Unverified — click a marker for details
+              </p>
             </div>
           </div>
         )}
 
-        {/* Hotels List */}
-        <div className="bg-white rounded-lg shadow border">
-          {hotels.length === 0 && !loading ? (
-            <div className="flex items-center justify-center py-12">
-              <div className="text-center">
-                <Building className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                  No Hotels Found
-                </h3>
-                <p className="text-gray-600">
-                  {searchTerm
-                    ? "No hotels match your search criteria."
-                    : "No hotels have been registered yet."}
-                </p>
-                <button
-                  onClick={handleRefresh}
-                  className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                >
-                  Refresh List
-                </button>
+        {/* ════════════════════ TABLE VIEW ════════════════════ */}
+        {viewMode === "table" && (
+          <>
+            {/* Search and Filters */}
+            <div className="bg-white rounded-lg shadow border p-4 mb-6">
+              <div className="flex flex-col md:flex-row gap-4">
+                {/* Search */}
+                <form onSubmit={handleSearch} className="flex-1">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                    <input
+                      type="text"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      placeholder="Search hotels by name, email, or owner..."
+                      className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  </div>
+                </form>
+
+                {/* Filter Buttons */}
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleSearch}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    Search
+                  </button>
+                </div>
               </div>
             </div>
-          ) : (
-            <>
-              {/* Table Header */}
-              <div className="grid grid-cols-12 gap-4 p-4 border-b border-gray-200 bg-gray-50 font-semibold text-sm">
-                <div className="col-span-3">Hotel Details</div>
-                <div className="col-span-2">Owner Info</div>
-                <div className="col-span-2">Contact</div>
-                <div className="col-span-2">Capacity</div>
-                <div className="col-span-2">Registration</div>
-                <div className="col-span-1">Actions</div>
+
+            {/* Error Message */}
+            {error && (
+              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">
+                <div className="flex justify-between items-center">
+                  <span>{error}</span>
+                  <button
+                    onClick={() => setError("")}
+                    className="text-red-500 hover:text-red-700"
+                  >
+                    ×
+                  </button>
+                </div>
               </div>
+            )}
 
-              {/* Table Body */}
-              <div className="divide-y divide-gray-200">
-                {hotels.map((hotel) => {
-                  const verificationInfo = getVerificationStatusInfo(hotel);
-                  const StatusIcon = verificationInfo.icon;
-
-                  return (
-                    <div
-                      key={hotel._id}
-                      className="grid grid-cols-12 gap-4 p-4 hover:bg-gray-50 transition-colors"
+            {/* Hotels List */}
+            <div className="bg-white rounded-lg shadow border">
+              {hotels.length === 0 && !loading ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="text-center">
+                    <Building className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                    <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                      No Hotels Found
+                    </h3>
+                    <p className="text-gray-600">
+                      {searchTerm
+                        ? "No hotels match your search criteria."
+                        : "No hotels have been registered yet."}
+                    </p>
+                    <button
+                      onClick={handleRefresh}
+                      className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                     >
-                      {/* Hotel Details */}
-                      <div className="col-span-3">
-                        <div className="flex items-start space-x-3">
-                          <div className="flex-shrink-0">
-                            <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                              <Building className="w-5 h-5 text-blue-600" />
-                            </div>
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <h3 className="font-semibold text-gray-900 truncate">
-                              {hotel.name}
-                            </h3>
-                            <p className="text-sm text-gray-500 truncate">
-                              {hotel.accommodationType}
-                            </p>
-                            <p className="text-xs text-gray-400 mt-1 truncate">
-                              {formatAddress(hotel.address)}
-                            </p>
-                            <div className="flex items-center mt-1 flex-wrap gap-1">
-                              <span
-                                className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                                  hotel.isActive
-                                    ? "bg-green-100 text-green-800"
-                                    : "bg-red-100 text-red-800"
-                                }`}
-                              >
-                                {hotel.isActive ? "Active" : "Inactive"}
-                              </span>
-                              <span
-                                className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${verificationInfo.color}`}
-                              >
-                                <StatusIcon className="w-3 h-3 mr-1" />
-                                {verificationInfo.label}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
+                      Refresh List
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {/* Table Header */}
+                  <div className="grid grid-cols-12 gap-4 p-4 border-b border-gray-200 bg-gray-50 font-semibold text-sm">
+                    <div className="col-span-3">Hotel Details</div>
+                    <div className="col-span-2">Owner Info</div>
+                    <div className="col-span-2">Contact</div>
+                    <div className="col-span-2">Capacity</div>
+                    <div className="col-span-2">Registration</div>
+                    <div className="col-span-1">Actions</div>
+                  </div>
 
-                      {/* Owner Info */}
-                      <div className="col-span-2">
-                        <div className="flex items-center space-x-2">
-                          <User className="w-4 h-4 text-gray-400" />
-                          <div>
-                            <span className="text-sm text-gray-900 block">
-                              {hotel.ownerName}
-                            </span>
-                            <span className="text-xs text-gray-500">
-                              {hotel.ownerAadharNumber}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
+                  {/* Table Body */}
+                  <div className="divide-y divide-gray-200">
+                    {hotels.map((hotel) => {
+                      const verificationInfo = getVerificationStatusInfo(hotel);
+                      const StatusIcon = verificationInfo.icon;
 
-                      {/* Contact */}
-                      <div className="col-span-2">
-                        <div className="space-y-1">
-                          <div className="flex items-center space-x-2">
-                            <Phone className="w-4 h-4 text-gray-400" />
-                            <span className="text-sm text-gray-900">
-                              {hotel.ownerPhone}
-                            </span>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <Mail className="w-4 h-4 text-gray-400" />
-                            <span className="text-xs text-gray-500 truncate">
-                              {hotel.email}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Capacity */}
-                      <div className="col-span-2">
-                        <div className="space-y-1">
-                          <div className="flex items-center space-x-2">
-                            <Bed className="w-4 h-4 text-gray-400" />
-                            <span className="text-sm text-gray-900">
-                              {hotel.numberOfRooms} rooms
-                            </span>
-                          </div>
-                          <div className="text-xs text-gray-500">
-                            GST: {hotel.gstNumber}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Registration */}
-                      <div className="col-span-2">
-                        <div className="flex items-center space-x-2 mb-1">
-                          <Calendar className="w-4 h-4 text-gray-400" />
-                          <span className="text-sm text-gray-900">
-                            {formatDate(hotel.registrationDate)}
-                          </span>
-                        </div>
-                        <div className="flex flex-wrap gap-1 mb-1">
-                          {hotel.registeredByPolice && (
-                            <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                              Police Registered
-                            </span>
-                          )}
-                        </div>
-                        {hotel.policeOfficer?.name && (
-                          <p className="text-xs text-gray-500">
-                            By: {hotel.policeOfficer.name}
-                          </p>
-                        )}
-                      </div>
-
-                      {/* Actions */}
-                      <div className="col-span-1">
-                        <button
-                          onClick={() => handleViewHotel(hotel)}
-                          className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                          title="View Details & Update Info"
+                      return (
+                        <div
+                          key={hotel._id}
+                          className="grid grid-cols-12 gap-4 p-4 hover:bg-gray-50 transition-colors"
                         >
-                          <Eye className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
+                          {/* Hotel Details */}
+                          <div className="col-span-3">
+                            <div className="flex items-start space-x-3">
+                              <div className="flex-shrink-0">
+                                <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                                  <Building className="w-5 h-5 text-blue-600" />
+                                </div>
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <h3 className="font-semibold text-gray-900 truncate">
+                                  {hotel.name}
+                                </h3>
+                                <p className="text-sm text-gray-500 truncate">
+                                  {hotel.accommodationType}
+                                </p>
+                                <p className="text-xs text-gray-400 mt-1 truncate">
+                                  {formatAddress(hotel.address)}
+                                </p>
+                                <div className="flex items-center mt-1 flex-wrap gap-1">
+                                  <span
+                                    className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                                      hotel.isActive
+                                        ? "bg-green-100 text-green-800"
+                                        : "bg-red-100 text-red-800"
+                                    }`}
+                                  >
+                                    {hotel.isActive ? "Active" : "Inactive"}
+                                  </span>
+                                  <span
+                                    className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${verificationInfo.color}`}
+                                  >
+                                    <StatusIcon className="w-3 h-3 mr-1" />
+                                    {verificationInfo.label}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
 
-          {/* Pagination */}
-          {pagination && pagination.totalPages > 1 && (
-            <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200">
-              <div className="text-sm text-gray-600">
-                Showing {(pagination.currentPage - 1) * pagination.limit + 1} to{" "}
-                {Math.min(
-                  pagination.currentPage * pagination.limit,
-                  pagination.totalCount
-                )}{" "}
-                of {pagination.totalCount} hotels
-              </div>
+                          {/* Owner Info */}
+                          <div className="col-span-2">
+                            <div className="flex items-center space-x-2">
+                              <User className="w-4 h-4 text-gray-400" />
+                              <div>
+                                <span className="text-sm text-gray-900 block">
+                                  {hotel.ownerName}
+                                </span>
+                                <span className="text-xs text-gray-500">
+                                  {hotel.ownerAadharNumber}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
 
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={() => handlePageChange(pagination.currentPage - 1)}
-                  disabled={!pagination.hasPrevPage}
-                  className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
+                          {/* Contact */}
+                          <div className="col-span-2">
+                            <div className="space-y-1">
+                              <div className="flex items-center space-x-2">
+                                <Phone className="w-4 h-4 text-gray-400" />
+                                <span className="text-sm text-gray-900">
+                                  {hotel.ownerPhone}
+                                </span>
+                              </div>
+                              <div className="flex items-center space-x-2">
+                                <Mail className="w-4 h-4 text-gray-400" />
+                                <span className="text-xs text-gray-500 truncate">
+                                  {hotel.email}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
 
-                <span className="text-sm text-gray-900">
-                  Page {pagination.currentPage} of {pagination.totalPages}
-                </span>
+                          {/* Capacity */}
+                          <div className="col-span-2">
+                            <div className="space-y-1">
+                              <div className="flex items-center space-x-2">
+                                <Bed className="w-4 h-4 text-gray-400" />
+                                <span className="text-sm text-gray-900">
+                                  {hotel.numberOfRooms} rooms
+                                </span>
+                              </div>
+                              <div className="text-xs text-gray-500">
+                                GST: {hotel.gstNumber}
+                              </div>
+                            </div>
+                          </div>
 
-                <button
-                  onClick={() => handlePageChange(pagination.currentPage + 1)}
-                  disabled={!pagination.hasNextPage}
-                  className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
+                          {/* Registration */}
+                          <div className="col-span-2">
+                            <div className="flex items-center space-x-2 mb-1">
+                              <Calendar className="w-4 h-4 text-gray-400" />
+                              <span className="text-sm text-gray-900">
+                                {formatDate(hotel.registrationDate)}
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap gap-1 mb-1">
+                              {hotel.registeredByPolice && (
+                                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                  Police Registered
+                                </span>
+                              )}
+                            </div>
+                            {hotel.policeOfficer?.name && (
+                              <p className="text-xs text-gray-500">
+                                By: {hotel.policeOfficer.name}
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Actions */}
+                          <div className="col-span-1">
+                            <button
+                              onClick={() => handleViewHotel(hotel)}
+                              className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                              title="View Details & Update Info"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+
+              {/* Pagination */}
+              {pagination && pagination.totalPages > 1 && (
+                <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200">
+                  <div className="text-sm text-gray-600">
+                    Showing {(pagination.currentPage - 1) * pagination.limit + 1} to{" "}
+                    {Math.min(
+                      pagination.currentPage * pagination.limit,
+                      pagination.totalCount,
+                    )}{" "}
+                    of {pagination.totalCount} hotels
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={() => handlePageChange(pagination.currentPage - 1)}
+                      disabled={!pagination.hasPrevPage}
+                      className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+
+                    <span className="text-sm text-gray-900">
+                      Page {pagination.currentPage} of {pagination.totalPages}
+                    </span>
+
+                    <button
+                      onClick={() => handlePageChange(pagination.currentPage + 1)}
+                      disabled={!pagination.hasNextPage}
+                      className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </>
+        )}
 
         {/* Hotel Details Modal with Update Capabilities */}
         {selectedHotel && (

@@ -1,4 +1,4 @@
-// App.tsx - Updated with nested admin routes
+// App.tsx - Updated with nested admin routes + AI Agent
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -15,12 +15,14 @@ import ReportsPage from "@/components/Dashboard/ReportsPage";
 import SuspectsPage from "@/components/Dashboard/SuspectsPage";
 import HotelRegistration from "@/components/Dashboard/HotelRegistration";
 import HotelList from "@/components/Dashboard/HotelList";
-// Import Admin Components
+// Admin Components
 import { SubPoliceManagement } from "@/components/Dashboard/AdminDashboard/SubPoliceManagement";
 import { ActivityMonitoring } from "@/components/Dashboard/AdminDashboard/ActivityMonitoring";
 import { SystemOverview } from "@/components/Dashboard/AdminDashboard/SystemOverview";
 import { AdminReports } from "@/components/Dashboard/AdminDashboard/AdminReports";
 import NotFound from "./pages/NotFound";
+// ✅ NEW — AI Agent (accessible to all police roles)
+import PoliceAiAgent from "@/pages/PoliceAiAgent";
 
 const queryClient = new QueryClient();
 
@@ -54,6 +56,9 @@ const App = () => (
                 <Route path="suspects" element={<SuspectsPage />} />
                 <Route path="hotels/register" element={<HotelRegistration />} />
                 <Route path="hotels/list" element={<HotelList />} />
+
+                {/* ✅ AI Agent — available to sub-police AND admin, no AdminRoute wrapper */}
+                <Route path="ai-agent" element={<PoliceAiAgent />} />
 
                 {/* Admin Routes (Protected) */}
                 <Route

@@ -63,13 +63,17 @@ const Login: React.FC = () => {
 
     try {
       // API call to login endpoint
-      const response = await fetch("http://localhost:5000/api/hotels/login", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+      // ✅ Fix — use backticks
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL || "http://localhost:5000"}/api/hotels/login`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(loginForm),
         },
-        body: JSON.stringify(loginForm),
-      });
+      );
 
       const data = await response.json();
 

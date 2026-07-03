@@ -1,4 +1,4 @@
-// components/Dashboard/Sidebar.tsx - FIXED with proper TypeScript types
+// components/Dashboard/Sidebar.tsx
 import { useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -16,10 +16,9 @@ import {
   Clock,
   Crown,
   Activity,
-  BarChart3,
-  Settings,
   Eye,
   UserCog,
+  Bot, // ✅ NEW
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { usePoliceAuth } from "@/contexts/PoliceAuthContext";
@@ -30,14 +29,13 @@ interface SidebarProps {
   onOpenChange: (open: boolean) => void;
 }
 
-// Define proper types for sidebar items
 type SidebarLinkItem = {
   title: string;
   icon: React.ComponentType<any>;
   href: string;
   exact?: boolean;
   color: string;
-  submenu?: never; // This ensures submenu is never present when href exists
+  submenu?: never;
 };
 
 type SidebarSubmenuItem = {
@@ -49,8 +47,8 @@ type SidebarSubmenuItem = {
     href: string;
     icon: React.ComponentType<any>;
   }>;
-  href?: never; // This ensures href is never present when submenu exists
-  exact?: never; // This ensures exact is never present when submenu exists
+  href?: never;
+  exact?: never;
 };
 
 type SidebarItem = SidebarLinkItem | SidebarSubmenuItem;
@@ -118,6 +116,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ open, onOpenChange }) => {
       href: "/dashboard/suspects",
       color: "text-white",
     },
+    // ✅ NEW — AI Assistant (visible to all officers)
+    {
+      title: "AI Assistant",
+      icon: Bot,
+      href: "/dashboard/ai-agent",
+      color: "text-white",
+    },
   ];
 
   // Admin-only sidebar items
@@ -137,7 +142,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ open, onOpenChange }) => {
           href: "/dashboard/admin/activities",
           icon: Activity,
         },
-
         {
           title: "Admin Reports",
           href: "/dashboard/admin/reports",
@@ -147,32 +151,27 @@ export const Sidebar: React.FC<SidebarProps> = ({ open, onOpenChange }) => {
     },
   ];
 
-  // Combine items based on role
   const sidebarItems: SidebarItem[] = isAdmin
     ? [...baseSidebarItems, ...adminSidebarItems]
     : baseSidebarItems;
 
-  // Helper function to check if item has submenu
   const hasSubmenu = (item: SidebarItem): item is SidebarSubmenuItem => {
     return "submenu" in item && Array.isArray(item.submenu);
   };
 
-  // Helper function to check if item has href
   const hasHref = (item: SidebarItem): item is SidebarLinkItem => {
     return "href" in item && typeof item.href === "string";
   };
 
   return (
     <>
-      {/* Fixed Sidebar */}
       <aside
         className={cn(
           "fixed left-0 top-0 z-50 h-full w-80 shadow-2xl transform transition-transform duration-300 ease-in-out lg:translate-x-0",
-          // Different gradients for admin vs regular police
           isAdmin
             ? "bg-gradient-to-b from-[#4c1d95] to-[#7c3aed]"
             : "bg-gradient-to-b from-[#1e3a5f] to-[#0ea5e9]",
-          open ? "translate-x-0" : "-translate-x-full"
+          open ? "translate-x-0" : "-translate-x-full",
         )}
       >
         <div className="flex flex-col h-full text-white">
@@ -269,9 +268,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ open, onOpenChange }) => {
                     >
                       <div className="flex items-center">
                         <item.icon
-                          className={`h-5 w-5 mr-3 ${
-                            item.color || "text-white"
-                          }`}
+                          className={`h-5 w-5 mr-3 ${item.color || "text-white"}`}
                         />
                         <span className="font-medium">{item.title}</span>
                       </div>
@@ -298,7 +295,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ open, onOpenChange }) => {
                                 "flex items-center px-3 py-2 text-sm rounded-lg transition-colors",
                                 isActive
                                   ? "bg-yellow-400 text-blue-900 shadow-lg font-medium"
-                                  : "text-white/80 hover:bg-white/10 hover:text-white"
+                                  : "text-white/80 hover:bg-white/10 hover:text-white",
                               )
                             }
                             onClick={() => onOpenChange(false)}
@@ -316,9 +313,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ open, onOpenChange }) => {
                     className={({ isActive }) =>
                       cn(
                         "flex items-center px-4 py-3 rounded-lg transition-colors border border-white/20 mb-2",
-                        isActive
-                          ? "bg-yellow-400 text-blue-900 shadow-lg font-medium"
-                          : "text-white hover:bg-white/10 hover:border-white/40"
+                        // ✅ AI Assistant gets a subtle glow to stand out
+                        item.title === "AI Assistant"
+                          ? isActive
+                            ? "bg-yellow-400 text-blue-900 shadow-lg font-medium"
+                            : "text-white hover:bg-white/10 hover:border-white/40 border-white/30 bg-white/5"
+                          : isActive
+                            ? "bg-yellow-400 text-blue-900 shadow-lg font-medium"
+                            : "text-white hover:bg-white/10 hover:border-white/40",
                       )
                     }
                     onClick={() => onOpenChange(false)}
@@ -328,6 +330,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ open, onOpenChange }) => {
                       className={`h-5 w-5 mr-3 ${item.color || "text-white"}`}
                     />
                     <span className="font-medium">{item.title}</span>
+                    {/* ✅ Small badge so officers notice it */}
+                    {item.title === "AI Assistant" && (
+                      <span className="ml-auto text-[10px] bg-white/20 text-white/90 px-1.5 py-0.5 rounded-full font-medium">
+                        NEW
+                      </span>
+                    )}
                   </NavLink>
                 ) : null}
               </div>
@@ -340,8 +348,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ open, onOpenChange }) => {
               <Clock className="h-3 w-3" />
               <span>System Time: {new Date().toLocaleTimeString()}</span>
             </div>
-
-            {/* Logout Button */}
             <Button
               variant="destructive"
               className="w-full bg-red-600 hover:bg-red-700 shadow-lg"

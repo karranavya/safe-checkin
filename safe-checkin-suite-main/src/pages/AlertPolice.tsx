@@ -71,8 +71,9 @@ import { fetchGuests } from "@/api/guestApi";
 import EvidenceUpload from "@/components/Evidence/EvidenceUpload";
 
 // Create axios instance for alerts API with authentication
+// ✅ Fix
 const alertsApi = axios.create({
-  baseURL: "http://localhost:5000/api/alerts",
+  baseURL: `${import.meta.env.VITE_API_URL || "http://localhost:5000"}/api/alerts`,
   timeout: 10000,
   headers: {
     "Content-Type": "application/json",
@@ -90,7 +91,7 @@ alertsApi.interceptors.request.use(
   },
   (error) => {
     return Promise.reject(error);
-  }
+  },
 );
 
 // Add response interceptor for error handling
@@ -104,7 +105,7 @@ alertsApi.interceptors.response.use(
       window.location.href = "/login";
     }
     return Promise.reject(error);
-  }
+  },
 );
 
 interface AlertData {
@@ -228,7 +229,7 @@ const GuestAlertManagement = () => {
   // Fetch guest alerts
   const fetchGuestAlerts = async (guestId: string) => {
     const filteredAlerts = allAlerts.filter(
-      (alert: AlertData) => alert.guest?.id === guestId
+      (alert: AlertData) => alert.guest?.id === guestId,
     );
     setGuestAlerts(filteredAlerts);
   };
@@ -288,7 +289,7 @@ const GuestAlertManagement = () => {
       // Remove duplicates based on guest ID
       const uniqueGuests = combinedGuests.filter(
         (guest, index, self) =>
-          index === self.findIndex((g) => g._id === guest._id)
+          index === self.findIndex((g) => g._id === guest._id),
       );
 
       if (uniqueGuests.length === 0) {
@@ -623,7 +624,7 @@ const GuestAlertManagement = () => {
                           onValueChange={(value) => {
                             const [type, order] = value.split("-") as [
                               SortType,
-                              SortOrder
+                              SortOrder,
                             ];
                             setSortType(type);
                             setSortOrder(order);
@@ -674,7 +675,7 @@ const GuestAlertManagement = () => {
                           const statusConfig = getStatusConfig(guest.status);
                           const isSelected = selectedGuest?._id === guest._id;
                           const guestAlertCount = allAlerts.filter(
-                            (alert) => alert.guest?.id === guest._id
+                            (alert) => alert.guest?.id === guest._id,
                           ).length;
 
                           return (
@@ -712,7 +713,7 @@ const GuestAlertManagement = () => {
                                             {new Date(
                                               guest.checkInTime ||
                                                 guest.checkInDate ||
-                                                ""
+                                                "",
                                             ).toLocaleDateString()}
                                           </Badge>
                                         </div>
@@ -822,7 +823,7 @@ const GuestAlertManagement = () => {
                                         <div className="flex items-center gap-2 mb-2">
                                           <div
                                             className={`h-3 w-3 rounded-full ${getPriorityColor(
-                                              alert.priority
+                                              alert.priority,
                                             )}`}
                                           />
                                           <h3 className="font-semibold text-gray-900">
@@ -1122,7 +1123,7 @@ const GuestAlertManagement = () => {
                       <div className="flex items-center space-x-3">
                         <div
                           className={`h-3 w-3 rounded-full ${getPriorityColor(
-                            alert.priority
+                            alert.priority,
                           )}`}
                         />
                         <div>
@@ -1366,7 +1367,7 @@ const GuestAlertManagement = () => {
                   <Label className="text-sm font-medium">Priority</Label>
                   <Badge
                     className={`mt-1 ${getPriorityColor(
-                      selectedAlert.priority
+                      selectedAlert.priority,
                     )} text-white`}
                   >
                     {selectedAlert.priority}

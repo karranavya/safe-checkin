@@ -2,7 +2,7 @@
 import axios from "axios";
 import { Guest } from "@/components/dashboard/GuestTable";
 
-const API_BASE = "http://localhost:5000/api/guests";
+const API_BASE = `${import.meta.env.VITE_API_URL ?? "http://localhost:5000"}/api/guests`;
 
 // Create axios instance with default config
 const api = axios.create({
@@ -30,7 +30,7 @@ api.interceptors.request.use(
   },
   (error) => {
     return Promise.reject(error);
-  }
+  },
 );
 
 // Add response interceptor for error handling and auth
@@ -47,7 +47,7 @@ api.interceptors.response.use(
     }
 
     return Promise.reject(error);
-  }
+  },
 );
 
 // UPDATED: Check-in function to handle FormData properly
@@ -196,11 +196,11 @@ export const validateUniqueness = async (params: {
 
 export const checkGuestByRoom = async (
   roomNumber: string,
-  status = "checked-in"
+  status = "checked-in",
 ) => {
   try {
     const response = await api.get(
-      `/room?roomNumber=${roomNumber}&status=${status}`
+      `/room?roomNumber=${roomNumber}&status=${status}`,
     );
     return response.data;
   } catch (error) {
@@ -225,7 +225,7 @@ export const checkOutGuest = async (
     checkOutDate?: string;
     finalAmount?: number;
     notes?: string;
-  }
+  },
 ) => {
   try {
     const response = await api.put(`/${guestId}/checkout`, checkoutData || {});
@@ -237,7 +237,7 @@ export const checkOutGuest = async (
 
 export const updateGuest = async (
   guestId: string,
-  guestData: Partial<Guest>
+  guestData: Partial<Guest>,
 ) => {
   try {
     const response = await api.put(`/${guestId}`, guestData);

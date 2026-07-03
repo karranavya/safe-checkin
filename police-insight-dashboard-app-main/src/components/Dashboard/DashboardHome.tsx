@@ -1,4 +1,4 @@
-// components/Dashboard/DashboardHome.tsx - UPDATED with role-based content and data fetching
+// components/Dashboard/DashboardHome.tsx - UPDATED with real jurisdiction map, System Health removed
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +22,8 @@ import {
 import { usePoliceAuth } from "@/contexts/PoliceAuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { useNavigate } from "react-router-dom";
+import { useJurisdictionData } from "@/hooks/useJurisdictionData";
+import { JurisdictionMap } from "./JurisdictionMap";
 
 // TypeScript interfaces
 interface Hotel {
@@ -50,7 +52,6 @@ interface AdminStats {
   totalSubPolice: number;
   activeSubPolice: number;
   weeklyActivities: number;
-  systemHealth: number;
   recentActivities: any[];
   activitiesByAction: any[];
 }
@@ -96,6 +97,10 @@ export const DashboardHome = () => {
   // Role detection
   const isAdmin = user?.role === "admin_police";
 
+  // Real jurisdiction + map data — used by both admin and sub-police views
+  const { data: jurisdictionData, loading: jurisdictionLoading } =
+    useJurisdictionData();
+
   // Common state
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -113,11 +118,6 @@ export const DashboardHome = () => {
     totalGuests: 0,
   });
   const [recentActivity, setRecentActivity] = useState<any[]>([]);
-
-  // Debug logs
-  console.log("🔍 DashboardHome - User:", user);
-  console.log("🔍 DashboardHome - Role:", user?.role);
-  console.log("🔍 DashboardHome - Is Admin?:", isAdmin);
 
   // API call helper function
   const apiCall = async <T,>(endpoint: string): Promise<ApiResponse<T>> => {
@@ -143,11 +143,9 @@ export const DashboardHome = () => {
   // Fetch admin dashboard data
   const fetchAdminData = async () => {
     try {
-      console.log("🔄 Fetching admin data...");
-
       const [subPoliceRes, activityStatsRes] = await Promise.all([
         apiCall<{ officers: any[]; pagination: { totalCount: number } }>(
-          "/api/police/sub-police?limit=1000"
+          "/api/police/sub-police?limit=1000",
         ),
         apiCall<{
           summary: { totalActivities: number };
@@ -164,19 +162,16 @@ export const DashboardHome = () => {
               ?.length || 0,
           weeklyActivities:
             activityStatsRes.data?.summary?.totalActivities || 0,
-          systemHealth: 98.5,
           recentActivities: activityStatsRes.data?.recentActivities || [],
           activitiesByAction: activityStatsRes.data?.activitiesByAction || [],
         });
       }
     } catch (error) {
       console.error("Failed to fetch admin data:", error);
-      // Fallback to mock data for demo
       setAdminStats({
         totalSubPolice: 12,
         activeSubPolice: 10,
         weeklyActivities: 156,
-        systemHealth: 98.5,
         recentActivities: [],
         activitiesByAction: [],
       });
@@ -186,8 +181,6 @@ export const DashboardHome = () => {
   // Fetch regular police dashboard data
   const fetchRegularData = async () => {
     try {
-      console.log("🔄 Fetching regular police data...");
-
       const [hotelsResponse, statsResponse] = await Promise.all([
         apiCall<Hotel[]>("/api/reports/hotels-stats?period=all"),
         apiCall<AreaStats>("/api/reports/area-stats?period=all"),
@@ -204,11 +197,10 @@ export const DashboardHome = () => {
             totalCheckouts: 0,
             totalAccommodations: 0,
             totalGuests: 0,
-          }
+          },
         );
       }
 
-      // Generate recent activity from hotels data
       if (hotelsResponse.success && hotelsResponse.data) {
         const activity = hotelsResponse.data
           .filter((hotel) => hotel.checkins > 0 || hotel.checkouts > 0)
@@ -229,12 +221,11 @@ export const DashboardHome = () => {
     } catch (err) {
       console.error("Dashboard data fetch error:", err);
       setError(
-        err instanceof Error ? err.message : "Failed to fetch dashboard data"
+        err instanceof Error ? err.message : "Failed to fetch dashboard data",
       );
     }
   };
 
-  // Main data fetch function
   const fetchDashboardData = async () => {
     setLoading(true);
     setError(null);
@@ -254,17 +245,12 @@ export const DashboardHome = () => {
     }
   };
 
-  // Initial data fetch
   useEffect(() => {
-    console.log("📊 DashboardHome useEffect - Role:", user?.role);
     fetchDashboardData();
-
-    // Set up auto-refresh every 2 minutes
     const interval = setInterval(fetchDashboardData, 120000);
     return () => clearInterval(interval);
   }, [isAdmin, user?.role]);
 
-  // Get activity icon
   const getActivityIcon = (type: string) => {
     switch (type) {
       case "checkin":
@@ -301,7 +287,7 @@ export const DashboardHome = () => {
     );
   }
 
-  // Admin Dashboard Render
+  // ════════════════════════ ADMIN DASHBOARD ════════════════════════
   if (isAdmin && adminStats) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-50 to-blue-50 p-6">
@@ -338,7 +324,7 @@ export const DashboardHome = () => {
             </div>
           </div>
 
-          {/* Admin Stats Grid */}
+          {/* Admin Stats Grid — System Health replaced with real Jurisdiction Coverage */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <Card className="bg-white shadow-xl border-0 rounded-2xl overflow-hidden border-l-4 border-blue-500">
               <div className="bg-gradient-to-r from-blue-500 to-blue-600 p-4">
@@ -390,7 +376,7 @@ export const DashboardHome = () => {
               <CardContent className="p-4">
                 <div className="flex items-center text-xs text-green-600">
                   <TrendingUp className="h-3 w-3 mr-1" />
-                  +12% from last week
+                  Last 7 days
                 </div>
                 <Button
                   variant="outline"
@@ -403,33 +389,40 @@ export const DashboardHome = () => {
               </CardContent>
             </Card>
 
-            <Card className="bg-white shadow-xl border-0 rounded-2xl overflow-hidden border-l-4 border-purple-500">
-              <div className="bg-gradient-to-r from-purple-500 to-purple-600 p-4">
+            {/* ✅ NEW — replaces the old fake "System Health" card with real jurisdiction data */}
+            <Card className="bg-white shadow-xl border-0 rounded-2xl overflow-hidden border-l-4 border-teal-500">
+              <div className="bg-gradient-to-r from-teal-500 to-teal-600 p-4">
                 <div className="flex items-center justify-between">
                   <div className="text-white">
-                    <p className="text-purple-100 text-sm font-medium">
-                      System Health
+                    <p className="text-teal-100 text-sm font-medium">
+                      Jurisdiction Coverage
                     </p>
-                    <p className="text-3xl font-bold text-green-300">
-                      {adminStats.systemHealth}%
+                    <p className="text-3xl font-bold">
+                      {jurisdictionLoading
+                        ? "…"
+                        : (jurisdictionData?.counts.total ?? 0)}
                     </p>
                   </div>
                   <div className="bg-white/20 p-3 rounded-full">
-                    <Shield className="h-6 w-6 text-white" />
+                    <MapPin className="h-6 w-6 text-white" />
                   </div>
                 </div>
               </div>
               <CardContent className="p-4">
                 <p className="text-xs text-muted-foreground">
-                  All systems operational
+                  {jurisdictionLoading
+                    ? "Loading..."
+                    : jurisdictionData?.configured
+                      ? `${jurisdictionData.counts.verified} verified · ${jurisdictionData.counts.pending} pending`
+                      : "Jurisdiction not set up yet"}
                 </p>
                 <Button
                   variant="outline"
                   size="sm"
                   className="mt-2 w-full"
-                  onClick={() => navigate("/dashboard/admin/analytics")}
+                  onClick={() => navigate("/dashboard/hotels/list")}
                 >
-                  View Analytics
+                  View Hotels
                 </Button>
               </CardContent>
             </Card>
@@ -463,6 +456,25 @@ export const DashboardHome = () => {
               </CardContent>
             </Card>
           </div>
+
+          {/* ✅ NEW — Real jurisdiction map (admin dashboard had no map at all before) */}
+          <Card className="bg-white shadow-xl border-0 rounded-2xl">
+            <CardHeader className="bg-gradient-to-r from-slate-50 to-purple-50 rounded-t-2xl">
+              <CardTitle className="flex items-center space-x-3">
+                <MapPin className="h-5 w-5 text-purple-600" />
+                <span className="text-gray-900">Jurisdiction Map</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-6">
+              {jurisdictionLoading ? (
+                <div className="h-[400px] flex items-center justify-center">
+                  <RefreshCw className="h-8 w-8 animate-spin text-purple-400" />
+                </div>
+              ) : (
+                <JurisdictionMap data={jurisdictionData} />
+              )}
+            </CardContent>
+          </Card>
 
           {/* Recent Activities & Quick Links */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -570,12 +582,15 @@ export const DashboardHome = () => {
     );
   }
 
-  // Regular Police Dashboard (your existing code with minor modifications)
-  const accommodationTypes = hotels.reduce((acc, hotel) => {
-    const type = hotel.type || "hotel";
-    acc[type] = (acc[type] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
+  // ════════════════════════ SUB-POLICE DASHBOARD ════════════════════════
+  const accommodationTypes = hotels.reduce(
+    (acc, hotel) => {
+      const type = hotel.type || "hotel";
+      acc[type] = (acc[type] || 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>,
+  );
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-6">
@@ -621,9 +636,8 @@ export const DashboardHome = () => {
           </div>
         )}
 
-        {/* Stats Cards - Your existing code */}
+        {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {/* Check-Ins */}
           <Card className="bg-white shadow-xl border-0 rounded-2xl overflow-hidden">
             <div className="bg-gradient-to-r from-emerald-500 to-emerald-600 p-4">
               <div className="flex items-center justify-between">
@@ -645,7 +659,6 @@ export const DashboardHome = () => {
             </CardContent>
           </Card>
 
-          {/* Active Accommodations */}
           <Card className="bg-white shadow-xl border-0 rounded-2xl overflow-hidden">
             <div className="bg-gradient-to-r from-blue-500 to-blue-600 p-4">
               <div className="flex items-center justify-between">
@@ -676,7 +689,6 @@ export const DashboardHome = () => {
             </CardContent>
           </Card>
 
-          {/* Check-Outs */}
           <Card className="bg-white shadow-xl border-0 rounded-2xl overflow-hidden">
             <div className="bg-gradient-to-r from-amber-500 to-amber-600 p-4">
               <div className="flex items-center justify-between">
@@ -698,7 +710,6 @@ export const DashboardHome = () => {
             </CardContent>
           </Card>
 
-          {/* Total Guests */}
           <Card className="bg-white shadow-xl border-0 rounded-2xl overflow-hidden">
             <div className="bg-gradient-to-r from-purple-500 to-purple-600 p-4">
               <div className="flex items-center justify-between">
@@ -719,28 +730,24 @@ export const DashboardHome = () => {
           </Card>
         </div>
 
-        {/* Map and Activity - Your existing code continues here... */}
+        {/* Map and Activity */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Map Section */}
+          {/* ✅ Real map — replaces the old fake dashed-border placeholder */}
           <Card className="lg:col-span-2 bg-white shadow-xl border-0 rounded-2xl">
             <CardHeader className="bg-gradient-to-r from-slate-50 to-blue-50 rounded-t-2xl">
               <CardTitle className="flex items-center space-x-3">
                 <MapPin className="h-5 w-5 text-blue-600" />
-                <span className="text-gray-900">Area Surveillance Map</span>
+                <span className="text-gray-900">Jurisdiction Map</span>
               </CardTitle>
             </CardHeader>
             <CardContent className="p-6">
-              <div className="aspect-video bg-gradient-to-br from-slate-100 to-slate-200 rounded-xl flex items-center justify-center border-2 border-dashed border-gray-300">
-                <div className="text-center space-y-3">
-                  <MapPin className="h-16 w-16 text-blue-500 mx-auto" />
-                  <p className="text-lg font-semibold text-gray-700">
-                    Interactive surveillance map
-                  </p>
-                  <p className="text-sm text-gray-500">
-                    Tracking {hotels.length} accommodation facilities
-                  </p>
+              {jurisdictionLoading ? (
+                <div className="h-[400px] flex items-center justify-center">
+                  <RefreshCw className="h-8 w-8 animate-spin text-blue-400" />
                 </div>
-              </div>
+              ) : (
+                <JurisdictionMap data={jurisdictionData} />
+              )}
             </CardContent>
           </Card>
 
@@ -784,7 +791,7 @@ export const DashboardHome = () => {
           </Card>
         </div>
 
-        {/* Accommodation Types Breakdown - Your existing code */}
+        {/* Accommodation Types Breakdown */}
         <Card className="bg-white shadow-xl border-0 rounded-2xl">
           <CardHeader className="bg-gradient-to-r from-slate-50 to-blue-50 rounded-t-2xl">
             <CardTitle className="flex items-center space-x-3">
@@ -812,7 +819,7 @@ export const DashboardHome = () => {
                       <div
                         className={`text-3xl font-bold mb-2 ${colorClass.replace(
                           "bg-",
-                          "text-"
+                          "text-",
                         )}`}
                       >
                         {count}
@@ -827,7 +834,7 @@ export const DashboardHome = () => {
                             width: `${
                               (count /
                                 Math.max(
-                                  ...Object.values(accommodationTypes)
+                                  ...Object.values(accommodationTypes),
                                 )) *
                               100
                             }%`,

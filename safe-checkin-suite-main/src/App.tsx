@@ -13,7 +13,7 @@ import GuestDetailsView from "./pages/GuestDetailsView";
 import NotFound from "./pages/NotFound";
 import MainLayout from "./components/layout/MainLayout";
 import { RoomProvider } from "./contexts/RoomContext";
-
+import AIAgent from "./pages/HotelAiAgent";
 const queryClient = new QueryClient();
 
 const App = () => (
@@ -33,6 +33,7 @@ const App = () => (
               <Route path="/alert-police" element={<AlertPolicePage />} />
               <Route path="/change-language" element={<ChangeLanguagePage />} />
               <Route path="/guest-details/:id" element={<GuestDetailsView />} />
+              <Route path="/ai-agent" element={<AIAgent />} />
             </Route>
 
             <Route path="*" element={<NotFound />} />

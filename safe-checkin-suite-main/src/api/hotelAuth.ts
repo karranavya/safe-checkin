@@ -27,7 +27,8 @@ export interface AuthResponse {
   };
 }
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || "http://localhost:5000";
+const API_BASE_URL =
+  import.meta.env.VITE_API_URL || "https://safecheckin-backend-1.onrender.com";
 
 export const hotelAuth = {
   login: async (data: LoginData): Promise<AuthResponse> => {
@@ -48,7 +49,7 @@ export const hotelAuth = {
   },
 
   register: async (
-    data: RegisterData
+    data: RegisterData,
   ): Promise<{ message: string; hotel: any }> => {
     const response = await fetch(`${API_BASE_URL}/api/hotels/register`, {
       method: "POST",

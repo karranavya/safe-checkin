@@ -31,6 +31,8 @@ const activityRoutes = require("./routes/activityRoutes");
 const suspectRoutes = require("./routes/suspectRoutes");
 const hotelSuspectRoutes = require("./routes/hotelSuspectRoutes");
 
+// ⭐ ADD THIS LINE HERE (after hotelSuspectRoutes, before evidence check)
+const { createProxyMiddleware } = require("http-proxy-middleware");
 // ⭐ NEW: Evidence routes
 const evidenceRoutes = fs.existsSync("./routes/evidenceRoutes.js")
   ? require("./routes/evidenceRoutes")
@@ -47,7 +49,54 @@ const PORT = process.env.PORT || 5000;
 /* ────────────────────────────  SERVER SETUP  ───────────────────────────── */
 const server = require("http").createServer(app);
 
+/* ─────────────────────────────  CORS & BASIC MIDDLEWARE  ───────────────────────────── */
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(",")
+  : [];
+
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      } else {
+        console.log("❌ Blocked by CORS:", origin);
+        return callback(new Error("Not allowed by CORS"));
+      }
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  }),
+);
+
+app.use(
+  "/api/agent",
+  createProxyMiddleware({
+    target: "http://localhost:8000",
+    changeOrigin: true,
+    pathRewrite: { "^/api/agent": "" },
+    on: {
+      error: (err, req, res) => {
+        console.error("[SafeAI Proxy] Error:", err.message);
+        if (!res.headersSent) {
+          res.status(503).json({
+            error: "AI service unavailable",
+            message: "Ensure the Python AI service is running on port 8000",
+          });
+        }
+      },
+    },
+  }),
+);
+
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
+
 // ========== INCREASED TIMEOUTS FOR FILE UPLOADS ========== //
+
 app.use("/api/guests/checkin", (req, res, next) => {
   req.setTimeout(300000); // 5 minutes
   res.setTimeout(300000);
@@ -252,20 +301,6 @@ app.get("/debug/evidence", (req, res) => {
 app.use(securityHeaders);
 app.use(sanitizeInput);
 
-/* ─────────────────────────────  CORS & BASIC MIDDLEWARE  ───────────────────────────── */
-const allowedOrigins = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.split(",")
-  : [];
-
-app.use(
-  cors({
-    origin: allowedOrigins,
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-  }),
-);
-
 // Simple request logging
 app.use((req, res, next) => {
   if (
@@ -321,6 +356,8 @@ mongoose.set("bufferCommands", false);
 
 /* ──────────────────────────────  ROUTES  ─────────────────────────────── */
 
+const { startAutoCheckoutJob } = require("./jobs/autoCheckout");
+startAutoCheckoutJob();
 // Health check route
 app.get("/", (_req, res) => {
   res.json({

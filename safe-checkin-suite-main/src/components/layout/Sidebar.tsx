@@ -10,6 +10,7 @@ import {
   Languages,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Bot } from "lucide-react"; // add to existing imports
 
 const navItems = [
   { to: "/dashboard", label: "Dashboard", icon: Home },
@@ -33,7 +34,7 @@ const Sidebar = ({
       className={cn(
         "fixed top-0 left-0 z-50 h-screen bg-white border-r shadow transition-all duration-300",
         isOpen ? "w-64" : "w-0 overflow-hidden",
-        "lg:w-64"
+        "lg:w-64",
       )}
     >
       <div className="flex flex-col h-full p-4 overflow-y-auto">
@@ -50,7 +51,7 @@ const Sidebar = ({
               className={({ isActive }) =>
                 cn(
                   "flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground hover:text-primary transition-all",
-                  isActive && "bg-primary/10 text-primary"
+                  isActive && "bg-primary/10 text-primary",
                 )
               }
             >
@@ -58,6 +59,19 @@ const Sidebar = ({
               {item.label}
             </NavLink>
           ))}
+          <NavLink
+            to="/ai-agent"
+            onClick={onNavigate}
+            className={({ isActive }) =>
+              cn(
+                "flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground hover:text-primary transition-all",
+                isActive && "bg-primary/10 text-primary",
+              )
+            }
+          >
+            <Bot className="h-4 w-4" />
+            AI Assistant
+          </NavLink>
         </nav>
 
         <div className="mt-auto">

@@ -126,7 +126,7 @@ const CheckInPage = () => {
       (data.childGuests || 0);
     if (totalBreakdown !== guestCount) {
       errors.push(
-        `Guest breakdown (${totalBreakdown}) must equal total guests (${guestCount})`
+        `Guest breakdown (${totalBreakdown}) must equal total guests (${guestCount})`,
       );
     }
 
@@ -192,7 +192,7 @@ const CheckInPage = () => {
 
         if (guest.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guest.email)) {
           errors.push(
-            `Guest ${index + 1}: Please provide a valid email address`
+            `Guest ${index + 1}: Please provide a valid email address`,
           );
         }
       });
@@ -294,6 +294,7 @@ const CheckInPage = () => {
         childGuests: childGuests,
         totalAmount: parseFloat(guestFormData.totalAmount) || 0,
         advanceAmount: parseFloat(guestFormData.advanceAmount) || 0,
+        paymentMethod: guestFormData.paymentMethod || "Cash",
         checkInTime: new Date().toISOString(),
         guests: capturedGuestsData.map((guest) => ({
           name: guest.name?.toString().trim() || "",
@@ -337,12 +338,26 @@ const CheckInPage = () => {
         formData.append("maleGuests", finalGuestData.maleGuests.toString());
         formData.append("femaleGuests", finalGuestData.femaleGuests.toString());
         formData.append("childGuests", finalGuestData.childGuests.toString());
+        formData.append("checkInTime", finalGuestData.checkInTime);
+
+        // ✅ FIX: checkOutDateTime from GuestDetailsForm was never appended
+        if (finalGuestData.checkOutDateTime) {
+          formData.append(
+            "checkOutDate",
+            new Date(finalGuestData.checkOutDateTime).toISOString(),
+          );
+        }
+
+        // ✅ Payment fields
         formData.append("totalAmount", finalGuestData.totalAmount.toString());
         formData.append(
           "advanceAmount",
-          finalGuestData.advanceAmount.toString()
+          finalGuestData.advanceAmount.toString(),
         );
-        formData.append("checkInTime", finalGuestData.checkInTime);
+        formData.append(
+          "paymentMethod",
+          finalGuestData.paymentMethod || "Cash",
+        );
 
         // FIXED: Handle guests array properly - send as JSON string
         formData.append("guests", JSON.stringify(finalGuestData.guests));
@@ -352,14 +367,14 @@ const CheckInPage = () => {
           formData.append(
             "guestPhoto",
             photoFiles.guestPhoto,
-            photoFiles.guestPhoto.name
+            photoFiles.guestPhoto.name,
           );
         }
         if (photoFiles.idFront) {
           formData.append(
             "idFront",
             photoFiles.idFront,
-            photoFiles.idFront.name
+            photoFiles.idFront.name,
           );
         }
         if (photoFiles.idBack) {
@@ -370,7 +385,7 @@ const CheckInPage = () => {
         for (let [key, value] of formData.entries()) {
           if (value instanceof File) {
             console.log(
-              `${key}: File - ${value.name} (${value.size} bytes, ${value.type})`
+              `${key}: File - ${value.name} (${value.size} bytes, ${value.type})`,
             );
           } else {
             console.log(`${key}: ${value}`);
@@ -395,12 +410,12 @@ const CheckInPage = () => {
 
         if (error.response?.data?.errors) {
           const validationErrors = error.response.data.errors.map(
-            (err: any) => `${err.path}: ${err.msg}`
+            (err: any) => `${err.path}: ${err.msg}`,
           );
           errorMessage = `Validation errors: ${validationErrors.join(", ")}`;
           console.error(
             "Backend validation errors:",
-            error.response.data.errors
+            error.response.data.errors,
           );
         } else if (error.response?.data?.message) {
           errorMessage = error.response.data.message;
@@ -426,7 +441,7 @@ const CheckInPage = () => {
   // Handle photo file changes
   const handlePhotoChange = (
     photoType: keyof PhotoFiles,
-    file: File | null
+    file: File | null,
   ) => {
     setPhotoFiles((prev) => ({
       ...prev,

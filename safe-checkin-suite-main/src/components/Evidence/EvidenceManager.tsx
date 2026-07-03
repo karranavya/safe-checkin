@@ -50,7 +50,9 @@ export default function EvidenceManager({ suspectId }: EvidenceManagerProps) {
       setLoading(true);
       const token =
         localStorage.getItem("token") || localStorage.getItem("hotelToken");
-      const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:5000";
+      const apiUrl =
+        import.meta.env.VITE_API_URL ||
+        "https://safecheckin-backend-1.onrender.com";
 
       const response = await fetch(
         `${apiUrl}/api/evidence/suspect/${suspectId}`,
@@ -58,7 +60,7 @@ export default function EvidenceManager({ suspectId }: EvidenceManagerProps) {
           headers: {
             Authorization: `Bearer ${token}`,
           },
-        }
+        },
       );
 
       if (response.ok) {

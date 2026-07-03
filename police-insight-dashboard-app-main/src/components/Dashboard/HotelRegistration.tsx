@@ -1,5 +1,5 @@
-// src/pages/HotelRegistration.tsx - UPDATED VERSION WITH VERIFICATION STATUS
-import React, { useState, useEffect } from "react";
+// src/pages/HotelRegistration.tsx - ADDED: Google Maps-style location search with auto-fill
+import React, { useState, useEffect, useRef } from "react";
 import {
   Building,
   Mail,
@@ -16,6 +16,7 @@ import {
   Shield,
   Clock,
   X,
+  Search,
 } from "lucide-react";
 
 interface RegisterFormData {
@@ -62,10 +63,38 @@ interface PoliceAuth {
   loginTime?: number;
 }
 
+// Shape of a single Nominatim search result (only the fields we use)
+interface NominatimResult {
+  display_name: string;
+  lat: string;
+  lon: string;
+  address?: {
+    house_number?: string;
+    road?: string;
+    suburb?: string;
+    city?: string;
+    town?: string;
+    village?: string;
+    county?: string;
+    state?: string;
+    postcode?: string;
+  };
+}
+
 const HotelRegistration: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(false);
   const [message, setMessage] = useState<MessageState>({ type: "", text: "" });
   const [currentStep, setCurrentStep] = useState<number>(1);
+
+  const [coordinates, setCoordinates] = useState<[number, number] | null>(null);
+  const [locationCapturing, setLocationCapturing] = useState(false);
+
+  // ✅ NEW — location search (Google Maps-style autocomplete using OpenStreetMap)
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<NominatimResult[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const skipSearchRef = useRef(false); // prevents re-searching right after picking a result
 
   const [registerForm, setRegisterForm] = useState<RegisterFormData>({
     name: "",
@@ -162,11 +191,106 @@ const HotelRegistration: React.FC = () => {
     console.log("sessionStorage keys:", Object.keys(sessionStorage));
   }, []);
 
+  // ✅ NEW — debounced search against OpenStreetMap's Nominatim API.
+  // Waits 500ms after typing stops, requires 3+ characters, restricted to India.
+  useEffect(() => {
+    if (skipSearchRef.current) {
+      skipSearchRef.current = false;
+      return;
+    }
+
+    if (!searchQuery || searchQuery.trim().length < 3) {
+      setSearchResults([]);
+      setShowDropdown(false);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      searchLocation(searchQuery);
+    }, 500);
+
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery]);
+
+  const searchLocation = async (query: string) => {
+    setSearchLoading(true);
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&countrycodes=in&limit=5&q=${encodeURIComponent(
+          query,
+        )}`,
+      );
+      const data: NominatimResult[] = await res.json();
+      setSearchResults(data);
+      setShowDropdown(data.length > 0);
+    } catch (err) {
+      console.error("Location search failed:", err);
+      setSearchResults([]);
+      setShowDropdown(false);
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  // Matches a free-text state name from Nominatim against our fixed
+  // dropdown list (the <select> needs an exact string match to show correctly).
+  const matchIndianState = (stateName?: string): string => {
+    if (!stateName) return "";
+    const found = indianStates.find(
+      (s) => s.toLowerCase() === stateName.toLowerCase(),
+    );
+    return found || "";
+  };
+
+  // ✅ NEW — when an officer picks a search result, auto-fill every
+  // address field AND the GPS coordinates in one go.
+  const selectSearchResult = (result: NominatimResult) => {
+    const addr = result.address || {};
+
+    const street =
+      [addr.house_number, addr.road || addr.suburb].filter(Boolean).join(" ") ||
+      result.display_name.split(",")[0];
+
+    const city =
+      addr.city ||
+      addr.town ||
+      addr.village ||
+      addr.suburb ||
+      addr.county ||
+      "";
+    const state = matchIndianState(addr.state);
+    const zipCode = addr.postcode || "";
+
+    setRegisterForm((prev) => ({
+      ...prev,
+      address: {
+        ...prev.address,
+        street,
+        city,
+        state,
+        zipCode,
+      },
+    }));
+
+    setCoordinates([parseFloat(result.lon), parseFloat(result.lat)]);
+
+    skipSearchRef.current = true; // avoid re-triggering search on the next line
+    setSearchQuery(result.display_name);
+    setSearchResults([]);
+    setShowDropdown(false);
+
+    setMessage({
+      type: "success",
+      text: "Address auto-filled from search — please double-check the fields below, then continue.",
+    });
+  };
+
   // Handle form changes
   const handleRegisterChange = (
     e: React.ChangeEvent<
       HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
-    >
+    >,
   ) => {
     const { name, value } = e.target;
 
@@ -199,7 +323,7 @@ const HotelRegistration: React.FC = () => {
 
   const validateGST = (gst: string): boolean => {
     return /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(
-      gst.toUpperCase()
+      gst.toUpperCase(),
     );
   };
 
@@ -207,41 +331,43 @@ const HotelRegistration: React.FC = () => {
     return /^\d{6}$/.test(zip);
   };
 
-  // Get current location
   const getCurrentLocation = () => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          console.log("Location:", {
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude,
-          });
-          setMessage({
-            type: "success",
-            text: "Location captured successfully!",
-          });
-        },
-        (error) => {
-          console.error("Error getting location:", error);
-          setMessage({
-            type: "error",
-            text: "Unable to get location. Please enable location services.",
-          });
-        }
-      );
-    } else {
+    if (!navigator.geolocation) {
       setMessage({
         type: "error",
         text: "Geolocation is not supported by this browser.",
       });
+      return;
     }
+
+    setLocationCapturing(true);
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        setCoordinates([longitude, latitude]);
+        setLocationCapturing(false);
+        setMessage({
+          type: "success",
+          text: `Location captured: ${latitude.toFixed(5)}, ${longitude.toFixed(5)}`,
+        });
+      },
+      (error) => {
+        console.error("Error getting location:", error);
+        setLocationCapturing(false);
+        setMessage({
+          type: "error",
+          text: "Unable to get location. Please enable location services and try again.",
+        });
+      },
+      { enableHighAccuracy: true, timeout: 10000 },
+    );
   };
 
   const handleRegister = async () => {
     setLoading(true);
     setMessage({ type: "", text: "" });
 
-    // Get authentication data
     let policeAuthRaw =
       localStorage.getItem("police-dashboard-auth") ||
       sessionStorage.getItem("police-dashboard-auth");
@@ -279,7 +405,6 @@ const HotelRegistration: React.FC = () => {
       return;
     }
 
-    // Comprehensive validation
     const {
       name,
       accommodationType,
@@ -298,7 +423,6 @@ const HotelRegistration: React.FC = () => {
       verificationNotes,
     } = registerForm;
 
-    // Required field validation
     if (
       !name ||
       !accommodationType ||
@@ -323,7 +447,6 @@ const HotelRegistration: React.FC = () => {
       return;
     }
 
-    // Format validation
     if (!validateEmail(email)) {
       setMessage({ type: "error", text: "Please enter a valid email address" });
       setLoading(false);
@@ -390,11 +513,10 @@ const HotelRegistration: React.FC = () => {
     try {
       const { confirmPassword: _, ...registerData } = registerForm;
 
-      // Create full address string
       const fullAddress = `${address.street}, ${address.city}, ${address.state} ${address.zipCode}, ${address.country}`;
 
       const response = await fetch(
-        "http://localhost:5000/api/hotels/register",
+        `${import.meta.env.VITE_API_URL || "http://localhost:5000"}/api/hotels/register`,
         {
           method: "POST",
           headers: {
@@ -408,6 +530,7 @@ const HotelRegistration: React.FC = () => {
               fullAddress: fullAddress,
             },
             numberOfRooms: parseInt(numberOfRooms),
+            location: coordinates ? { type: "Point", coordinates } : undefined,
             registeredByPolice: true,
             isVerified: verificationStatus === "verified",
             verificationStatus: verificationStatus,
@@ -425,7 +548,7 @@ const HotelRegistration: React.FC = () => {
               rank: policeAuth.police?.rank,
             },
           }),
-        }
+        },
       );
 
       const data = await response.json();
@@ -435,7 +558,6 @@ const HotelRegistration: React.FC = () => {
           type: "success",
           text: `Hotel registered successfully with ${verificationStatus} status!`,
         });
-        // Reset form
         setRegisterForm({
           name: "",
           accommodationType: "Hotel",
@@ -459,6 +581,8 @@ const HotelRegistration: React.FC = () => {
           verificationStatus: "pending",
           verificationNotes: "",
         });
+        setCoordinates(null);
+        setSearchQuery("");
         setCurrentStep(1);
       } else {
         setMessage({
@@ -532,7 +656,6 @@ const HotelRegistration: React.FC = () => {
         </div>
 
         <div className="bg-white rounded-lg shadow-lg p-6">
-          {/* Message Display */}
           {message.text && (
             <div
               className={`mb-6 p-4 rounded-lg flex items-center ${
@@ -557,7 +680,6 @@ const HotelRegistration: React.FC = () => {
                 Basic Information
               </h2>
 
-              {/* Hotel Name and Type */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -597,7 +719,6 @@ const HotelRegistration: React.FC = () => {
                 </div>
               </div>
 
-              {/* Owner Information */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -655,7 +776,6 @@ const HotelRegistration: React.FC = () => {
                 </div>
               </div>
 
-              {/* Contact and Property Information */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -695,7 +815,6 @@ const HotelRegistration: React.FC = () => {
                 </div>
               </div>
 
-              {/* Password Fields */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -743,14 +862,77 @@ const HotelRegistration: React.FC = () => {
                 <h2 className="text-xl font-semibold text-gray-900">
                   Address Information
                 </h2>
-                <button
-                  onClick={getCurrentLocation}
-                  className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                  disabled={loading}
-                >
-                  <MapIcon className="w-4 h-4 mr-2" />
-                  Get Current Location
-                </button>
+                <div className="flex flex-col items-end gap-1.5">
+                  <button
+                    onClick={getCurrentLocation}
+                    className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-60"
+                    disabled={loading || locationCapturing}
+                  >
+                    <MapIcon className="w-4 h-4 mr-2" />
+                    {locationCapturing
+                      ? "Capturing..."
+                      : "Get Current Location"}
+                  </button>
+                  {coordinates ? (
+                    <span className="text-xs text-green-700 font-medium flex items-center gap-1">
+                      <CheckCircle className="w-3.5 h-3.5" />
+                      {coordinates[1].toFixed(5)}, {coordinates[0].toFixed(5)}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-amber-600">
+                      Location not captured yet
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* ✅ NEW — search-as-you-type address lookup, Google Maps style */}
+              <div className="relative">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Search Location
+                  <span className="text-gray-400 font-normal">
+                    {" "}
+                    — auto-fills the fields below
+                  </span>
+                </label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onFocus={() =>
+                      searchResults.length > 0 && setShowDropdown(true)
+                    }
+                    onBlur={() => setTimeout(() => setShowDropdown(false), 150)}
+                    placeholder="Search hotel name, road, or locality..."
+                    className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    disabled={loading}
+                  />
+                  {searchLoading && (
+                    <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
+                    </div>
+                  )}
+                </div>
+
+                {showDropdown && searchResults.length > 0 && (
+                  <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">
+                    {searchResults.map((result, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onMouseDown={() => selectSearchResult(result)}
+                        className="w-full text-left px-4 py-3 hover:bg-blue-50 border-b border-gray-100 last:border-0 flex items-start gap-2 transition-colors"
+                      >
+                        <MapPin className="w-4 h-4 text-gray-400 mt-0.5 shrink-0" />
+                        <span className="text-sm text-gray-700">
+                          {result.display_name}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div>
@@ -1077,6 +1259,20 @@ const HotelRegistration: React.FC = () => {
                     {registerForm.address.state} {registerForm.address.zipCode},{" "}
                     {registerForm.address.country}
                   </p>
+                  <p className="text-xs mt-2 flex items-center gap-1">
+                    <MapPin className="w-3.5 h-3.5 text-gray-400" />
+                    {coordinates ? (
+                      <span className="text-green-700 font-medium">
+                        GPS captured: {coordinates[1].toFixed(5)},{" "}
+                        {coordinates[0].toFixed(5)}
+                      </span>
+                    ) : (
+                      <span className="text-amber-600">
+                        No GPS location captured — this hotel won't appear on
+                        the jurisdiction map until location is added
+                      </span>
+                    )}
+                  </p>
                 </div>
 
                 <div className="bg-gray-50 p-4 rounded-lg">
@@ -1106,7 +1302,7 @@ const HotelRegistration: React.FC = () => {
                   <div className="flex items-center mb-2">
                     {(() => {
                       const statusOption = verificationStatusOptions.find(
-                        (opt) => opt.value === registerForm.verificationStatus
+                        (opt) => opt.value === registerForm.verificationStatus,
                       );
                       const IconComponent = statusOption?.icon || Shield;
                       return (

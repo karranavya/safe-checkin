@@ -45,6 +45,11 @@ const guestDetailsSchema = z
     bookingMode: z.string({ required_error: "Please select booking mode." }),
     bookingWebsite: z.string().optional(),
 
+    // Section 2b: Payment
+    totalAmount: z.coerce.number().min(0, "Cannot be negative.").default(0),
+    advanceAmount: z.coerce.number().min(0, "Cannot be negative.").default(0),
+    paymentMethod: z.string().optional(),
+
     // Section 3: Stay Information
     checkInDateTime: z.date({
       required_error: "Check-in date & time is required.",
@@ -65,7 +70,7 @@ const guestDetailsSchema = z
     {
       message: "Guest segregation must add up to total guests.",
       path: ["guestCount"],
-    }
+    },
   )
   .refine((data) => data.checkOutDateTime > data.checkInDateTime, {
     message: "Check-out date must be after check-in date.",
@@ -81,7 +86,7 @@ const guestDetailsSchema = z
     {
       message: "Booking source name is required for online bookings.",
       path: ["bookingWebsite"],
-    }
+    },
   );
 
 type GuestDetailsFormValues = z.infer<typeof guestDetailsSchema>;
@@ -98,7 +103,7 @@ const GuestDetailsForm = ({
     [key: string]: string;
   }>({});
   const [isValidating, setIsValidating] = useState<{ [key: string]: boolean }>(
-    {}
+    {},
   );
 
   // Helper function to get default check-out date (next day at 11 AM)
@@ -123,6 +128,9 @@ const GuestDetailsForm = ({
       bookingWebsite: formData?.bookingWebsite || "",
       referenceNumber: formData?.referenceNumber || "",
       bookingMode: formData?.bookingMode || "",
+      totalAmount: (formData as any)?.totalAmount ?? 0,
+      advanceAmount: (formData as any)?.advanceAmount ?? 0,
+      paymentMethod: (formData as any)?.paymentMethod || "Cash",
 
       checkInDateTime: formData?.checkInDateTime || new Date(), // Current date and time
       checkOutDateTime: formData?.checkOutDateTime || getDefaultCheckOutDate(), // Next day at 11 AM
@@ -206,13 +214,13 @@ const GuestDetailsForm = ({
         setIsValidating((prev) => ({ ...prev, [field]: false }));
       }
     },
-    [form]
+    [form],
   );
 
   // Debounce helper
   const useDebounce = (callback: Function, delay: number) => {
     const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(
-      null
+      null,
     );
 
     return useCallback(
@@ -227,19 +235,19 @@ const GuestDetailsForm = ({
 
         setDebounceTimer(newTimer);
       },
-      [callback, delay, debounceTimer]
+      [callback, delay, debounceTimer],
     );
   };
 
   // FIXED: Use the correct validation function
   const debouncedValidateRoom = useDebounce(
     (value: string) => validateUniquenessField("roomNumber", value),
-    800
+    800,
   );
 
   const debouncedValidatePhone = useDebounce(
     (value: string) => validateUniquenessField("phone", value),
-    800
+    800,
   );
 
   // Watch for changes in critical fields
@@ -281,13 +289,13 @@ const GuestDetailsForm = ({
   const onSubmit = async (data: GuestDetailsFormValues) => {
     // Check if there are any validation errors
     const hasValidationErrors = Object.values(validationErrors).some(
-      (error) => error !== ""
+      (error) => error !== "",
     );
 
     if (hasValidationErrors) {
       // Shake the fields with errors
       const errorFields = Object.keys(validationErrors).filter(
-        (key) => validationErrors[key] !== ""
+        (key) => validationErrors[key] !== "",
       );
       setShakeFields(errorFields);
       setTimeout(() => setShakeFields([]), 820);
@@ -308,7 +316,7 @@ const GuestDetailsForm = ({
               ? ""
               : `Phone number already exists for ${result.existingGuest?.name}`,
             result,
-          }))
+          })),
         );
       }
 
@@ -323,7 +331,7 @@ const GuestDetailsForm = ({
                 ? `Room ${data.roomNumber} is already occupied`
                 : "",
             result: { isUnique: roomCheck.count === 0 },
-          }))
+          })),
         );
       }
 
@@ -563,7 +571,9 @@ const GuestDetailsForm = ({
                 <div
                   className={`space-y-2 ${
                     shakeFields.some((f) =>
-                      ["adultGuests", "childGuests", "infantGuests"].includes(f)
+                      ["adultGuests", "childGuests", "infantGuests"].includes(
+                        f,
+                      ),
                     )
                       ? "shake"
                       : ""
@@ -704,6 +714,119 @@ const GuestDetailsForm = ({
                   />
                 )}
               </div>
+            </CardContent>
+          </Card>
+
+          {/* Section 2b: Payment */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Payment Details</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <FormField
+                  control={form.control}
+                  name="totalAmount"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Total Amount (₹)</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          placeholder="0.00"
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="advanceAmount"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Advance Paid (₹)</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          placeholder="0.00"
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="paymentMethod"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Payment Method</FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        defaultValue={field.value}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select method" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="Cash">Cash</SelectItem>
+                          <SelectItem value="Card">Card</SelectItem>
+                          <SelectItem value="UPI">UPI</SelectItem>
+                          <SelectItem value="Bank Transfer">
+                            Bank Transfer
+                          </SelectItem>
+                          <SelectItem value="Cheque">Cheque</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              {/* Balance auto-display */}
+              {(() => {
+                const total = Number(watchedValues.totalAmount) || 0;
+                const advance = Number(watchedValues.advanceAmount) || 0;
+                const balance = total - advance;
+                return (
+                  <div className="flex items-center gap-6 px-3 py-2 bg-muted/50 rounded-lg text-sm">
+                    <span className="text-muted-foreground">
+                      Total:{" "}
+                      <strong className="text-foreground">
+                        ₹{total.toFixed(2)}
+                      </strong>
+                    </span>
+                    <span className="text-muted-foreground">
+                      Advance:{" "}
+                      <strong className="text-green-600">
+                        ₹{advance.toFixed(2)}
+                      </strong>
+                    </span>
+                    <span className="text-muted-foreground">
+                      Balance:{" "}
+                      <strong
+                        className={
+                          balance > 0 ? "text-amber-600" : "text-green-600"
+                        }
+                      >
+                        ₹{balance.toFixed(2)}
+                      </strong>
+                    </span>
+                  </div>
+                );
+              })()}
             </CardContent>
           </Card>
 
