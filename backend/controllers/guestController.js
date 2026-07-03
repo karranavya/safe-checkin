@@ -226,7 +226,7 @@ const getPhoto = async (req, res) => {
 
     // Get photo info
     const photoInfo = guest.photos?.[photoType];
-    if (!photoInfo || !photoInfo.path) {
+    if (!photoInfo || (!photoInfo.data && !photoInfo.path)) {
       console.log("❌ Photo not found for type:", photoType);
       return res.status(404).json({
         success: false,
@@ -234,12 +234,28 @@ const getPhoto = async (req, res) => {
       });
     }
 
-    // Construct full file path
+    // ⭐ NEW: serve straight from base64 stored in Mongo
+    if (photoInfo.data) {
+      console.log("✅ Serving base64 photo from Mongo:", photoType);
+
+      const mimeType = photoInfo.mimeType || "image/jpeg";
+      const buffer = Buffer.from(photoInfo.data, "base64");
+
+      res.setHeader("Content-Type", mimeType);
+      res.setHeader("Cache-Control", "public, max-age=31536000");
+      res.setHeader(
+        "Content-Disposition",
+        `inline; filename="${photoInfo.filename || photoType}"`,
+      );
+
+      return res.send(buffer);
+    }
+
+    // Legacy fallback: old guests still have a disk path
     const filePath = path.join(__dirname, "..", photoInfo.path);
 
-    console.log("📁 Looking for file at:", filePath);
+    console.log("📁 Looking for legacy file at:", filePath);
 
-    // Check if file exists
     try {
       await fs.access(filePath);
     } catch {
@@ -252,7 +268,6 @@ const getPhoto = async (req, res) => {
 
     console.log("✅ File found, serving:", photoInfo.filename);
 
-    // Serve the file
     const ext = path.extname(photoInfo.filename || "").toLowerCase();
     const mimeTypes = {
       ".jpg": "image/jpeg",

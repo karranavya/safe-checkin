@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { usePoliceAuth } from "@/contexts/PoliceAuthContext";
+import ReactMarkdown from "react-markdown";
 
 const BACKEND = (import.meta.env.VITE_API_URL ?? "http://localhost:5000")
   .replace(/\/api\/?$/, "")
@@ -229,16 +230,29 @@ export default function PoliceAiAgent() {
               </div>
             )}
 
-            <div
-              className={`max-w-[82%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap ${
-                msg.role === "user"
-                  ? "bg-primary text-primary-foreground rounded-tr-sm"
-                  : "bg-muted rounded-tl-sm"
-              }`}
-            >
-              {msg.content}
+            <div className="max-w-[82%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ...">
+              {msg.role === "assistant" ? (
+                <ReactMarkdown
+                  components={{
+                    img: ({ src, alt }) => (
+                      <img
+                        src={src}
+                        alt={alt}
+                        className="rounded-lg max-w-full mt-2 mb-1 border border-border"
+                        loading="lazy"
+                      />
+                    ),
+                    p: ({ children }) => (
+                      <p className="mb-1.5 last:mb-0">{children}</p>
+                    ),
+                  }}
+                >
+                  {msg.content}
+                </ReactMarkdown>
+              ) : (
+                <span className="whitespace-pre-wrap">{msg.content}</span>
+              )}
             </div>
-
             {msg.role === "user" && (
               <div className="shrink-0 w-7 h-7 mt-0.5 bg-primary rounded-full flex items-center justify-center">
                 <User className="h-3.5 w-3.5 text-primary-foreground" />

@@ -37,7 +37,9 @@ const TOKEN = () => localStorage.getItem("hotelToken");
 const authHeaders = () => ({ Authorization: `Bearer ${TOKEN()}` });
 
 interface PhotoInfo {
-  path?: string;
+  data?: string; // ⭐ NEW: base64-encoded image content (from Mongo)
+  mimeType?: string; // ⭐ NEW: needed to build the data URI
+  path?: string; // Legacy: disk path (old guests only)
   filename?: string;
   originalName?: string;
   size?: number;
@@ -747,6 +749,11 @@ const PhotoGallery = ({
   }>({});
 
   const getPhotoUrl = (photoInfo: PhotoInfo) => {
+    // ⭐ NEW: photos are now stored as base64 in Mongo - build a data URI
+    if (photoInfo.data) {
+      return `data:${photoInfo.mimeType || "image/jpeg"};base64,${photoInfo.data}`;
+    }
+    // Legacy fallback for guests checked in before the base64 migration
     const baseUrl =
       import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
     const photoPath = photoInfo.path || photoInfo.filename || "";

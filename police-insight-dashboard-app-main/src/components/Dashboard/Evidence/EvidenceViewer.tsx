@@ -38,7 +38,8 @@ interface Evidence {
   evidenceType: string;
   files: Array<{
     fileName: string;
-    fileUrl: string;
+    fileData?: string;
+    fileUrl?: string;
     fileSize: number;
     mimeType: string;
     uploadedAt: string;
@@ -69,7 +70,7 @@ export default function EvidenceViewer({
   const [evidence, setEvidence] = useState<Evidence[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedEvidence, setSelectedEvidence] = useState<Evidence | null>(
-    null
+    null,
   );
   const [showModal, setShowModal] = useState(false);
 
@@ -102,13 +103,13 @@ export default function EvidenceViewer({
       evidenceDescription: ev.description,
       hotelName: ev.hotelId?.name,
       globalIndex: `${evIndex}-${fileIndex}`,
-    }))
+    })),
   );
 
   const imageFiles = allFiles.filter((f) => f.mimeType?.startsWith("image/"));
   const videoFiles = allFiles.filter((f) => f.mimeType?.startsWith("video/"));
   const documentFiles = allFiles.filter(
-    (f) => f.mimeType?.includes("pdf") || f.mimeType?.includes("document")
+    (f) => f.mimeType?.includes("pdf") || f.mimeType?.includes("document"),
   );
 
   const getFilteredFiles = () => {
@@ -131,7 +132,7 @@ export default function EvidenceViewer({
         `${apiUrl}/api/evidence/shared/${suspectId}`,
         {
           headers: { Authorization: `Bearer ${token}` },
-        }
+        },
       );
 
       if (response.ok) {
@@ -206,16 +207,24 @@ export default function EvidenceViewer({
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + " KB";
     return (bytes / (1024 * 1024)).toFixed(2) + " MB";
   };
+  // ⭐ NEW: files now come back with base64 `fileData` instead of a disk `fileUrl`
+  const getFileSrc = (file: any) => {
+    if (file?.fileData) {
+      return `data:${file.mimeType || "application/octet-stream"};base64,${file.fileData}`;
+    }
+    // Legacy fallback for evidence uploaded before the base64 migration
+    return `${apiUrl}${file?.fileUrl}`;
+  };
 
   const handleDownload = async (
     evidenceId: string,
     fileIndex: number,
-    fileName: string
+    fileName: string,
   ) => {
     try {
       const response = await fetch(
         `${apiUrl}/api/evidence/download/${evidenceId}/${fileIndex}`,
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: { Authorization: `Bearer ${token}` } },
       );
 
       if (response.ok) {
@@ -368,14 +377,14 @@ export default function EvidenceViewer({
                       openImageViewer(
                         file,
                         imageFiles.findIndex(
-                          (f) => f.globalIndex === file.globalIndex
-                        )
+                          (f) => f.globalIndex === file.globalIndex,
+                        ),
                       )
                     }
                   >
                     {file.mimeType?.startsWith("image/") ? (
                       <img
-                        src={`${apiUrl}${file.fileUrl}`}
+                        src={getFileSrc(file)}
                         alt={file.fileName}
                         className="w-full h-full object-cover"
                         onError={(e) => {
@@ -423,18 +432,18 @@ export default function EvidenceViewer({
                         onClick={(e) => {
                           e.stopPropagation();
                           const evidenceIndex = evidence.findIndex(
-                            (ev) => ev._id === file.evidenceId
+                            (ev) => ev._id === file.evidenceId,
                           );
                           const fileIndexInEvidence = evidence[
                             evidenceIndex
                           ]?.files.findIndex(
-                            (f) => f.fileName === file.fileName
+                            (f) => f.fileName === file.fileName,
                           );
                           if (fileIndexInEvidence !== -1) {
                             handleDownload(
                               file.evidenceId,
                               fileIndexInEvidence,
-                              file.fileName
+                              file.fileName,
                             );
                           }
                         }}
@@ -486,7 +495,7 @@ export default function EvidenceViewer({
                         {getStatusBadge(item.status)}
                         <Badge
                           className={`text-xs ${getSeverityColor(
-                            item.severity
+                            item.severity,
                           )}`}
                         >
                           {item.severity}
@@ -510,20 +519,20 @@ export default function EvidenceViewer({
                                     const globalIndex = allFiles.findIndex(
                                       (f) =>
                                         f.evidenceId === item._id &&
-                                        f.fileName === file.fileName
+                                        f.fileName === file.fileName,
                                     );
                                     openImageViewer(
                                       allFiles[globalIndex],
                                       imageFiles.findIndex(
                                         (f) =>
                                           f.globalIndex ===
-                                          allFiles[globalIndex].globalIndex
-                                      )
+                                          allFiles[globalIndex].globalIndex,
+                                      ),
                                     );
                                   }}
                                 >
                                   <img
-                                    src={`${apiUrl}${file.fileUrl}`}
+                                    src={getFileSrc(file)}
                                     alt={file.fileName}
                                     className="w-full h-full object-cover"
                                     onError={(e) => {
@@ -547,7 +556,7 @@ export default function EvidenceViewer({
                                       handleDownload(
                                         item._id,
                                         idx,
-                                        file.fileName
+                                        file.fileName,
                                       )
                                     }
                                     className="h-6 px-2 rounded hover:bg-blue-100"
@@ -587,7 +596,7 @@ export default function EvidenceViewer({
                       <div className="mt-3 p-2 bg-green-50 rounded-lg text-xs">
                         ✅ Approved by {item.approvedBy.name} on{" "}
                         {new Date(
-                          item.approvedBy.timestamp
+                          item.approvedBy.timestamp,
                         ).toLocaleDateString()}
                       </div>
                     )}
@@ -649,7 +658,7 @@ export default function EvidenceViewer({
             <div className="flex-1 relative bg-gray-900 overflow-hidden">
               <div className="absolute inset-0 flex items-center justify-center p-8">
                 <img
-                  src={`${apiUrl}${selectedImage?.fileUrl}`}
+                  src={selectedImage ? getFileSrc(selectedImage) : ""}
                   alt={selectedImage?.fileName}
                   style={{
                     transform: `scale(${zoom}) rotate(${rotation}deg)`,
@@ -719,18 +728,18 @@ export default function EvidenceViewer({
               <Button
                 onClick={() => {
                   const evidenceIndex = evidence.findIndex(
-                    (ev) => ev._id === selectedImage.evidenceId
+                    (ev) => ev._id === selectedImage.evidenceId,
                   );
                   const fileIndexInEvidence = evidence[
                     evidenceIndex
                   ]?.files.findIndex(
-                    (f) => f.fileName === selectedImage.fileName
+                    (f) => f.fileName === selectedImage.fileName,
                   );
                   if (fileIndexInEvidence !== -1) {
                     handleDownload(
                       selectedImage.evidenceId,
                       fileIndexInEvidence,
-                      selectedImage.fileName
+                      selectedImage.fileName,
                     );
                   }
                 }}

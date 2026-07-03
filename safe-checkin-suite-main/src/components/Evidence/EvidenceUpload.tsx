@@ -36,7 +36,7 @@ export default function EvidenceUpload({
 
       // Validate only images
       const invalidFiles = selectedFiles.filter(
-        (file) => !file.type.startsWith("image/")
+        (file) => !file.type.startsWith("image/"),
       );
 
       if (invalidFiles.length > 0) {
@@ -48,16 +48,16 @@ export default function EvidenceUpload({
         return;
       }
 
-      // Validate file size (50MB max per file)
+      // Validate file size (8MB max per file)
       const oversizedFiles = selectedFiles.filter(
-        (file) => file.size > 50 * 1024 * 1024
+        (file) => file.size > 8 * 1024 * 1024,
       );
 
       if (oversizedFiles.length > 0) {
         toast({
           variant: "destructive",
           title: "File Too Large",
-          description: `${oversizedFiles.length} file(s) exceed 50MB limit`,
+          description: `${oversizedFiles.length} file(s) exceed 8MB limit`,
         });
         return;
       }
@@ -156,7 +156,7 @@ export default function EvidenceUpload({
             Authorization: `Bearer ${token}`,
           },
           body: formData,
-        }
+        },
       );
 
       clearInterval(progressInterval);
@@ -182,7 +182,7 @@ export default function EvidenceUpload({
       } else {
         const errorData = await response.json();
         throw new Error(
-          errorData.message || errorData.error || "Upload failed"
+          errorData.message || errorData.error || "Upload failed",
         );
       }
     } catch (error) {
@@ -236,7 +236,7 @@ export default function EvidenceUpload({
         {/* File Upload */}
         <div>
           <Label className="text-sm font-medium">
-            Images * (Max 5 images, 50MB each)
+            Images * (Max 5 images, 8MB each)
           </Label>
           <div className="mt-1">
             <label
@@ -253,7 +253,7 @@ export default function EvidenceUpload({
                   Click to upload images
                 </p>
                 <p className="text-xs text-gray-500 mt-1">
-                  JPG, PNG, WEBP up to 50MB
+                  JPG, PNG, WEBP up to 8MB
                 </p>
               </div>
               <input

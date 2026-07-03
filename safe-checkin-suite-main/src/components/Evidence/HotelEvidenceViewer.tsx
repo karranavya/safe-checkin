@@ -38,7 +38,8 @@ interface Evidence {
   evidenceType: string;
   files: Array<{
     fileName: string;
-    fileUrl: string;
+    fileData?: string; // ⭐ NEW: base64-encoded content, returned inline from the API
+    fileUrl?: string; // Legacy: disk path (old records only)
     fileSize: number;
     mimeType: string;
     uploadedAt: string;
@@ -132,7 +133,7 @@ export default function HotelEvidenceViewer({
       // ⭐ Filter alerts for this guest
       const guestAlerts = alertsData.filter(
         (alert: Alert) =>
-          alert.guest?.id === suspectId || alert.guestId === suspectId
+          alert.guest?.id === suspectId || alert.guestId === suspectId,
       );
 
       setAlerts(guestAlerts);
@@ -168,7 +169,7 @@ export default function HotelEvidenceViewer({
       const mostRecentAlert = alerts.sort(
         (a, b) =>
           new Date(b.createdAt || 0).getTime() -
-          new Date(a.createdAt || 0).getTime()
+          new Date(a.createdAt || 0).getTime(),
       )[0];
       return mostRecentAlert.status;
     }
@@ -261,9 +262,18 @@ export default function HotelEvidenceViewer({
     });
   };
 
+  // ⭐ NEW: files now come back with base64 `fileData` instead of a disk `fileUrl`
+  const getFileSrc = (file: any) => {
+    if (file.fileData) {
+      return `data:${file.mimeType || "application/octet-stream"};base64,${file.fileData}`;
+    }
+    // Legacy fallback for evidence uploaded before the base64 migration
+    return `${apiUrl}${file.fileUrl}`;
+  };
+
   const handleDownload = (file: any) => {
     const link = document.createElement("a");
-    link.href = `${apiUrl}${file.fileUrl}`;
+    link.href = getFileSrc(file);
     link.download = file.fileName;
     document.body.appendChild(link);
     link.click();
@@ -284,13 +294,13 @@ export default function HotelEvidenceViewer({
       hotelName: ev.hotelId?.name,
       globalIndex: `${evIndex}-${fileIndex}`,
       evidence: ev, // ⭐ Pass full evidence for status lookup
-    }))
+    })),
   );
 
   const imageFiles = allFiles.filter((f) => f.mimeType?.startsWith("image/"));
   const videoFiles = allFiles.filter((f) => f.mimeType?.startsWith("video/"));
   const documentFiles = allFiles.filter(
-    (f) => f.mimeType?.includes("pdf") || f.mimeType?.includes("document")
+    (f) => f.mimeType?.includes("pdf") || f.mimeType?.includes("document"),
   );
 
   const getFilteredFiles = () => {
@@ -424,14 +434,14 @@ export default function HotelEvidenceViewer({
                       openImageViewer(
                         file,
                         imageFiles.findIndex(
-                          (f) => f.globalIndex === file.globalIndex
-                        )
+                          (f) => f.globalIndex === file.globalIndex,
+                        ),
                       )
                     }
                   >
                     {file.mimeType?.startsWith("image/") ? (
                       <img
-                        src={`${apiUrl}${file.fileUrl}`}
+                        src={getFileSrc(file)}
                         alt={file.fileName}
                         className="w-full h-full object-cover"
                         onError={(e) => {
@@ -522,7 +532,7 @@ export default function HotelEvidenceViewer({
                         {getStatusBadge(item)}
                         <Badge
                           className={`text-xs ${getSeverityColor(
-                            item.severity
+                            item.severity,
                           )}`}
                         >
                           {item.severity}
@@ -546,20 +556,20 @@ export default function HotelEvidenceViewer({
                                     const globalIndex = allFiles.findIndex(
                                       (f) =>
                                         f.evidenceId === item._id &&
-                                        f.fileName === file.fileName
+                                        f.fileName === file.fileName,
                                     );
                                     openImageViewer(
                                       allFiles[globalIndex],
                                       imageFiles.findIndex(
                                         (f) =>
                                           f.globalIndex ===
-                                          allFiles[globalIndex].globalIndex
-                                      )
+                                          allFiles[globalIndex].globalIndex,
+                                      ),
                                     );
                                   }}
                                 >
                                   <img
-                                    src={`${apiUrl}${file.fileUrl}`}
+                                    src={getFileSrc(file)}
                                     alt={file.fileName}
                                     className="w-full h-full object-cover"
                                     onError={(e) => {
@@ -632,7 +642,7 @@ export default function HotelEvidenceViewer({
             <div className="flex-1 relative bg-gray-900 overflow-hidden">
               <div className="absolute inset-0 flex items-center justify-center p-8">
                 <img
-                  src={`${apiUrl}${selectedImage?.fileUrl}`}
+                  src={selectedImage ? getFileSrc(selectedImage) : ""}
                   alt={selectedImage?.fileName}
                   style={{
                     transform: `scale(${zoom}) rotate(${rotation}deg)`,

@@ -3,6 +3,10 @@ ReAct-style agent loop, with a defensive fallback for models that
 occasionally write a tool call as plain JSON text instead of using the
 structured tool_calls field (a known reliability quirk with some
 NVIDIA-hosted Llama models served via OpenAI-compatible APIs).
+
+⭐ Also guarantees photo markdown appears in the final answer
+   deterministically, instead of relying on the model to correctly
+   follow the PHOTO DISPLAY RULES in the system prompt every time.
 """
 from openai import AsyncOpenAI
 import json
@@ -80,6 +84,77 @@ def _try_parse_inline_tool_call(content: str) -> tuple[str, dict] | None:
     return None
 
 
+def _extract_records(data: object) -> list[dict]:
+    """
+    Normalise a single tool result's parsed JSON into a flat list of
+    record dicts. Tool results come back in different shapes:
+      - a plain list of records (search_guests, search_alerts)
+      - a dict with nested lists (text_search: {"guests": [...], "alerts": [...]})
+      - a single dict (get_stats, a single-match lookup)
+    """
+    if isinstance(data, list):
+        return [r for r in data if isinstance(r, dict)]
+
+    if isinstance(data, dict):
+        nested: list[dict] = []
+        found_nested = False
+        for value in data.values():
+            if isinstance(value, list):
+                nested.extend(r for r in value if isinstance(r, dict))
+                found_nested = True
+        return nested if found_nested else [data]
+
+    return []
+
+
+def _ensure_photo_markdown(final_text: str, tool_result_strs: list[str]) -> str:
+    """
+    Guarantee photo markdown appears in the final answer, regardless of
+    whether the model correctly followed the PHOTO DISPLAY RULES.
+
+    ⭐ Accumulates records across EVERY tool call made during this turn,
+    not just the most recent one — a multi-tool turn (e.g. search_hotels
+    then search_guests) would otherwise silently drop any guest/photo
+    data that arrived before the final tool call.
+
+    Appends markdown image tags for any photo URL not already present in
+    the model's answer, labelled with the guest's name (when available)
+    so multiple guests' photos aren't ambiguous once rendered.
+
+    This is deliberately dumb/deterministic — it does not try to parse
+    or rewrite what the model already wrote, it only fills gaps.
+    """
+    if not tool_result_strs:
+        return final_text
+
+    all_records: list[dict] = []
+    for tool_result_str in tool_result_strs:
+        if not tool_result_str:
+            continue
+        try:
+            data = json.loads(tool_result_str)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        all_records.extend(_extract_records(data))
+
+    lines_to_add = []
+    for rec in all_records:
+        photos = rec.get("photo_urls")
+        if not photos or not isinstance(photos, dict):
+            continue
+        guest_name = rec.get("name")
+        for label, url in photos.items():
+            if not url or url in final_text:
+                continue
+            full_label = f"{guest_name} — {label}" if guest_name else label
+            lines_to_add.append(f"![{full_label}]({url})")
+
+    if not lines_to_add:
+        return final_text
+
+    return final_text.rstrip() + "\n\n" + "\n".join(lines_to_add)
+
+
 async def run_agent(
     messages: list[dict],
     system_prompt: str,
@@ -87,8 +162,8 @@ async def run_agent(
     hotel_id: str | None = None,
     is_police: bool = False,
     is_admin: bool = False,
-    police_id: str | None = None,    # ⭐ NEW — requesting officer's own ID
-    police_role: str | None = None,  # ⭐ NEW — "admin_police" or "sub_police"
+    police_id: str | None = None,    # ⭐ requesting officer's own ID
+    police_role: str | None = None,  # ⭐ "admin_police" or "sub_police"
 ) -> str:
     if not messages:
         raise ValueError("messages list cannot be empty")
@@ -102,6 +177,8 @@ async def run_agent(
         {"role": "system", "content": enhanced_prompt},
         *trimmed,
     ]
+
+    all_tool_results: list[str] = []  # ⭐ track EVERY tool output this turn
 
     for iteration in range(MAX_TOOL_ITERATIONS):
 
@@ -132,7 +209,8 @@ async def run_agent(
 
         # No tool call detected either way — this is a genuine final answer
         if tool_name is None:
-            return msg.content or "Please try rephrasing your question."
+            text = msg.content or "Please try rephrasing your question."
+            return _ensure_photo_markdown(text, all_tool_results)
 
         tool_result = await execute_tool(
             tool_name=tool_name,
@@ -143,6 +221,7 @@ async def run_agent(
             police_id=police_id,
             police_role=police_role,
         )
+        all_tool_results.append(tool_result)  # ⭐ remember every call this turn
 
         if tool_call_id:
             # Real structured tool call — use the proper tool-result format
@@ -173,7 +252,8 @@ async def run_agent(
         max_tokens=MAX_TOKENS,
         messages=working_messages,
     )
-    return final.choices[0].message.content or "Please try rephrasing your question."
+    text = final.choices[0].message.content or "Please try rephrasing your question."
+    return _ensure_photo_markdown(text, all_tool_results)  # ⭐ applied here too
 
 
 def _convert_tools(anthropic_tools: list[dict]) -> list[dict]:
